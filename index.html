@@ -556,6 +556,31 @@ select.asg.bad { border-color: var(--bad); background: var(--bad-bg); color: var
 .loadbar span.over { background: var(--warn); }
 .teach-tabs button .cnt { font-weight: 500; }
 .gchip.off-on { background: var(--bad-bg); color: var(--bad); border: 1px solid var(--bad-line); font-weight: 700; }
+.teach-items { min-width: 220px; max-width: 460px; white-space: normal; line-height: 1.45; }
+/* 담당 수업 체크표 */
+.modal.wide { width: min(1180px, 100%); }
+.mx-sum { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); }
+.mx-sum .ov { color: var(--warn); font-weight: 700; }
+.mx-warns { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.mx-warns .note { padding: 6px 10px; }
+.mx-grade h4 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 14px 0 6px; font-size: 14px; }
+.mx-tbl th, .mx-tbl td { padding: 3px 5px !important; vertical-align: top; }
+.mx-tbl td:first-child { min-width: 150px; }
+.mx-td.on { background: var(--accent-soft); }
+.mx-td.over { background: var(--warn-bg); }
+.mx-cell { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font-size: 12.5px; white-space: nowrap; }
+.mx-cell input { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; flex: 0 0 auto; }
+.mx-cell.mx-sec { border: 1px solid var(--line-2); border-radius: 8px; padding: 3px 8px 3px 6px; background: var(--surface); }
+.mx-cell.mx-sec.on { background: var(--accent-soft); border-color: var(--accent); }
+.mx-cell .chip { padding: 1px 6px; font-size: 11px; font-weight: 700; }
+select.mx-h { height: 24px; padding: 0 2px; font-size: 12px; width: 50px; min-width: 0; }
+select.mx-h:disabled { opacity: .45; }
+select.mx-rowh { height: 24px; padding: 0 2px; font-size: 12px; width: 62px; min-width: 0; }
+.mx-other { font-size: 11px; color: var(--muted); margin-top: 2px; line-height: 1.3; }
+.mx-other .auto-dot { width: 6px; height: 6px; margin-left: 2px; }
+.mx-secs { display: flex; flex-wrap: wrap; gap: 6px 8px; padding: 2px 0; }
+.mx-quick { display: inline-flex; gap: 4px; align-items: center; }
+@media (max-width: 640px) { .mx-sum { font-size: 12px; } .mx-tbl td:first-child { min-width: 110px; } }
 .subj small.tn { display: block; font-size: 10px; opacity: .75; font-weight: 500; }
 
 /* ---------- 교사별 시간표(작은 주간표) ---------- */
@@ -623,6 +648,10 @@ table.tt.dg-av td small { overflow-wrap: anywhere; word-break: keep-all; }
   .dg-print .dg-ph-r { display: flex; align-items: center; gap: 3mm; }
   .dg-print .dg-logo { height: 11mm; width: auto; }
 }
+/* 교양 배분 */
+.good-ink { color: var(--good); font-weight: 700; }
+.warn-ink { color: var(--warn); font-weight: 700; }
+tr.mx-free > td:first-child { border-left: 3px solid var(--info); }
 
 </style>
 </head>
@@ -854,10 +883,11 @@ const CATALOG_RAW = [
   ['아랍어', '아랍어,아랍어 회화,심화 아랍어,아랍 문화'],
   ['베트남어', '베트남어,베트남어 회화,심화 베트남어,베트남 문화'],
   ['한문', '한문,한문 고전 읽기,언어생활과 한자'],
-  ['교양', '진로와 직업,생태와 환경,인간과 철학,논리와 사고,인간과 심리,교육의 이해,삶과 종교,보건,인간과 경제활동,논술'],
+  ['교양', '생태와 환경,인간과 철학,논리와 사고,인간과 심리,교육의 이해,삶과 종교,보건,인간과 경제활동,논술'],
+  ['진로상담', '진로와 직업,진로·학업 설계,진로와 학업 설계,진로 설계,진로 탐색'],   // 진로전담(진로상담) 교사가 맡는 과목
 ];
 /* 전공 → 상위 교과(부모 교과가 없을 때 대체) */
-const MAJOR_PARENT = { '역사': '사회', '지리': '사회', '일반사회': '사회', '윤리': '사회', '물리': '과학', '화학': '과학', '생명과학': '과학', '지구과학': '과학' };
+const MAJOR_PARENT = { '역사': '사회', '지리': '사회', '일반사회': '사회', '윤리': '사회', '물리': '과학', '화학': '과학', '생명과학': '과학', '지구과학': '과학', '진로상담': '교양' };
 const CATALOG = (() => {
   const m = new Map();
   for (const [major, list] of CATALOG_RAW) for (const nm of list.split(',')) m.set(normName(nm), { name: nm, major });
@@ -867,7 +897,8 @@ const CATALOG_NAMES = CATALOG_RAW.flatMap(([, l]) => l.split(','));
 
 /* 키워드 기반 추정(학교자율과목 등 목록에 없는 과목) */
 const KEYWORD_MAJOR = [
-  [/진로|보건|논술|논리|심리|철학/, '교양'],
+  [/진로/, '진로상담'],
+  [/보건|논술|논리|심리|철학/, '교양'],
   [/수학|미적분|기하|대수|확률|통계/, '수학'],
   [/영어|english/i, '영어'],
   [/국어|문학|독서|작문|화법|매체|언어생활/, '국어'],
@@ -943,7 +974,7 @@ function deptFamily(dept, depts) {
 const EX = {
   school: '예시고등학교', year: 2027,
   sizes: { 1: [26, 26, 26, 26, 26, 26], 2: [25, 25, 25, 25, 25, 25], 3: [25, 25, 25, 24, 24, 24] },
-  teachers: { kor: 5, math: 4, eng: 4, soc: 1, soc_gen: 2, soc_geo: 1, soc_his: 1, soc_eth: 2, sci: 0, sci_phy: 1, sci_che: 1, sci_bio: 2, sci_ear: 1, pe: 2, mus: 1, art: 1, info: 1, jpn: 1, lib: 0 },
+  teachers: { kor: 5, math: 4, eng: 4, soc: 1, soc_gen: 2, soc_geo: 1, soc_his: 1, soc_eth: 2, sci: 0, sci_phy: 1, sci_che: 1, sci_bio: 2, sci_ear: 1, pe: 2, mus: 1, art: 1, info: 1, jpn: 1, career: 1, lib: 0 },
   apply: '20261016',   // 수강신청한 날(파일 이름에 넣어 신청 당시 학년을 알 수 있게)
 };
 /* 3개년 편제(학교 지정): [교과(군), 유형, 과목, 기준 학점, 운영 학점, {학기: 학점}] — x: 교차집중 짝(1·2학년 음악↔미술) */
@@ -1210,14 +1241,15 @@ function defaultDepts() {
     D('sci', '과학'), D('sci_phy', '물리', 'sci'), D('sci_che', '화학', 'sci'), D('sci_bio', '생명과학', 'sci'), D('sci_ear', '지구과학', 'sci'),
     D('pe', '체육'), D('mus', '음악'), D('art', '미술'), D('tech', '기술·가정'), D('info', '정보'),
     D('jpn', '일본어'), D('chn', '중국어'), D('han', '한문'),
-    D('lib', '교양', null, { free: true }),
+    D('career', '진로상담', null, { t: 1 }),   // 진로전담 교사: 진로와 직업·진로·학업 설계
+    D('lib', '교양', null, { free: true }),      // 겸임: 전공 교사가 없어 시수 적은 교과 교사가 나누어 맡음(⑦ 교양 배분)
   ];
 }
 function emptyTerms() { return Object.fromEntries(TERM_KEYS.map(k => [k, { subjects: [], groups: [] }])); }
 
 function emptyState() {
   return {
-    v: 1,
+    v: 2,   // 2: 진로상담 교과 추가(2026-10-02)
     school: { name: '', year: new Date().getFullYear() + 1 },
     grades: [1, 2, 3].map(g => ({ g, classes: 0, students: 0, ca: 3, caSlots: [], off: [] })),
     rules: { cap: 29, tol: 0, small: 10, std: 18, tmax: 6, split: 2 },
@@ -1286,6 +1318,14 @@ function migrate(S0) {
   const ids = new Set(S.depts.map(d => d.id));
   for (const d of S.depts) if (d.parent && (d.parent === d.id || !ids.has(d.parent))) d.parent = null;
   for (const d of S.depts) if (d.parent) { const p = S.depts.find(x => x.id === d.parent); if (p && p.parent) d.parent = null; }
+  // 진로상담 교과(2026-10-02): 예전 자료에 없으면 추가하고, 교양(겸임)에 있던 진로 과목을 옮김(진로와 직업·진로·학업 설계는 진로전담 교사가 맡음)
+  let careerNew = null;
+  const v0 = S0 && typeof S0 === 'object' ? (+S0.v || 1) : 2;
+  if (v0 < 2 && S.depts.length && !S.depts.some(d => /진로/.test(d.name))) {
+    careerNew = ids.has('career') ? uid('d') : 'career';
+    const at = S.depts.findIndex(d => d.free && !d.parent);
+    S.depts.splice(at >= 0 ? at : S.depts.length, 0, { id: careerNew, name: '진로상담', t: 1, parent: null, free: false });
+  }
   const terms = obj(S.terms);
   S.terms = {};
   for (const k of TERM_KEYS) {
@@ -1299,6 +1339,11 @@ function migrate(S0) {
       })),
     };
   }
+  if (careerNew) {
+    const freeIds = new Set(S.depts.filter(d => d.free).map(d => d.id));
+    for (const k of TERM_KEYS) for (const x of [...S.terms[k].subjects, ...S.terms[k].groups.flatMap(G => G.subjects)]) if ((!x.dept || freeIds.has(x.dept)) && catalogMajor(x.name) === '진로상담') x.dept = careerNew;
+  }
+  S.v = 2;
   const blocks = obj(S.blocks); S.blocks = {};
   for (const [id, rec] of Object.entries(blocks)) if (rec && typeof rec === 'object') S.blocks[id] = { assign: obj(rec.assign), locks: obj(rec.locks), ...(rec.tsig ? { tsig: String(rec.tsig) } : {}) };
   const tt = obj(S.tt); S.tt = {};
@@ -1972,7 +2017,7 @@ function teacherModel(S, slots, DM) {
   list.forEach((t, i) => (t.off || []).forEach(k => { const s = tIdx.get(k); if (s != null) off[s * n + i] = 1; }));
   // 과목 교과 → 맡을 수 있는 교사(전공·상위 교과 교원): 자동 배정 칸을 다른 교사로 바꿔 볼 때 후보
   const candCache = new Map();
-  const candOf = deptId => { if (!candCache.has(deptId)) candCache.set(deptId, list.map((t, i) => (teacherFit(S, deptId, t) <= 1 ? i : -1)).filter(i => i >= 0)); return candCache.get(deptId); };
+  const candOf = deptId => { if (!candCache.has(deptId)) candCache.set(deptId, list.map((t, i) => (fitOk(teacherFit(S, deptId, t)) ? i : -1)).filter(i => i >= 0)); return candCache.get(deptId); };
   return { list, idx, n, dept, top, off, candOf };
 }
 /* 지정 과목 → 수업 단위(과목 × 반 × 나눈 시간). 교사는 상태(st.lt)에서 바뀔 수 있으므로 id에 넣지 않음 */
@@ -3232,16 +3277,22 @@ function deptTop(S, deptId) { const d = deptOf(S, deptId); if (!d) return null; 
 function familyDeptIds(S, topId) { return [topId, ...S.depts.filter(x => x.parent === topId).map(x => x.id)]; }
 function teachersOfFamily(S, topId) { const ids = new Set(familyDeptIds(S, topId)); return (S.teachers || []).filter(t => ids.has(t.dept)); }
 function teacherDeptName(S, t) { return deptPath(S, t.dept); }
-/* 과목 교과 → 교사 적합도: 0 같은 전공(상위 교과 공통 과목은 묶음 누구나) · 1 상위 교과(공통) 교원 · 2 같은 묶음 다른 전공(상치) · 9 다른 교과 */
+/* 겸임 교과(교양처럼 전공 교사가 따로 없는 교과: 시수 적은 교과 교사가 나누어 맡음) */
+function isFreeDept(S, deptId) { const d = deptOf(S, deptId); if (!d) return false; if (d.free) return true; const p = d.parent && deptOf(S, d.parent); return !!(p && p.free); }
+/* 과목 교과 → 교사 적합도: 0 같은 전공(상위 교과 공통 과목은 묶음 누구나) · 1 상위 교과(공통) 교원 · 2 같은 묶음 다른 전공(상치)
+   · 3 겸임 교과 과목(교양 배분: 어느 교과 교사든) · 9 다른 교과 */
 function teacherFit(S, subjDept, t) {
   if (!subjDept || !t || !t.dept) return 9;
   if (t.dept === subjDept) return 0;
+  if (isFreeDept(S, subjDept)) return isFreeDept(S, t.dept) ? 9 : 3;
   const top = deptTop(S, subjDept); if (!top) return 9;
   const ttop = deptTop(S, t.dept); if (ttop !== top) return 9;
   if (subjDept === top) return 0;
   if (t.dept === top) return 1;
   return 2;
 }
+/* 자동 배정·조정에서 맡길 수 있는 적합도(상치 2는 직접 정할 때만) */
+const fitOk = f => f <= 1 || f === 3;
 /* 교과·교원의 교원 수만큼 교사 칸 만들기(이름은 '국어1'처럼, 나중에 바꿀 수 있음). 지우지는 않음 */
 function syncTeacherSlots(S) {
   S.teachers = S.teachers || [];
@@ -3375,7 +3426,9 @@ function autoAssign(S, semArg, opts = {}) {
   syncTeacherSlots(S);
   ensureAllBlocks(S);
   const sems = semArg ? [+semArg] : [1, 2];
-  const tops = opts.top ? [opts.top] : S.depts.filter(d => !d.free && (!d.parent || !deptOf(S, d.parent))).map(d => d.id);
+  // 겸임 교과(교양)는 맨 뒤에: 다른 교과 배정이 끝난 뒤 시수가 적은 교사부터 나누어 맡김
+  const topList = S.depts.filter(d => !d.parent || !deptOf(S, d.parent));
+  const tops = opts.top ? [opts.top] : [...topList.filter(d => !d.free), ...topList.filter(d => d.free)].map(d => d.id);
   const std = Math.max(1, +S.rules.std || 18);
   const res = { assigned: 0, hours: 0, left: [], tops: [] };
   // 학기·학년마다 학급별 수업 시간(블록·창체를 뺀 칸): 한 교사가 그 학년 학급 수업을 이보다 많이 맡으면 같은 시간에 두 반이 겹침
@@ -3383,7 +3436,10 @@ function autoAssign(S, semArg, opts = {}) {
   for (const sem of [1, 2]) for (const gr of S.grades) { if (!gr.classes) continue; const tc = calcTerm(S, gr.g, sem); cs[sem][gr.g] = Math.max(0, Math.min(tc.maxClass, tc.avail - tc.blockHours - tc.ca)); }
   for (const top of tops) {
     const fam = new Set(familyDeptIds(S, top));
-    const teachers = (S.teachers || []).filter(t => fam.has(t.dept));
+    const freeTop = isFreeDept(S, top);
+    // 교양 배분 후보: 전공 교과 교사 모두(진로전담 교사는 상담 업무가 있어 자동 배분에서는 제외, 직접 정할 수는 있음)
+    const isCareer = t => { const d = deptOf(S, t.dept); return !!(d && /진로/.test(d.name)); };
+    const teachers = (S.teachers || []).filter(t => t.dept && (freeTop ? !isFreeDept(S, t.dept) && !isCareer(t) : fam.has(t.dept)));
     if (!teachers.length) continue;
     if (opts.redo) for (const sem of sems) clearAutoAssign(S, sem, fam);
     const L = {}, U = {};
@@ -3401,6 +3457,11 @@ function autoAssign(S, semArg, opts = {}) {
     }));
     const target = {};
     for (const sem of [1, 2]) target[sem] = (sum(teachers, t => st.get(t.id).tot[sem]) + sum(U[sem], u => u.h)) / teachers.length;
+    // 교양 배분: 교사 개인 시수와 그 교과 묶음 평균을 반씩 섞어 봄(묶음이 이미 찬 교과의 시수 적은 교사보다, 여유 있는 교과의 교사에게 먼저)
+    const famOfT = new Map(teachers.map(t => [t.id, deptTop(S, t.dept)]));
+    const famSum = { 1: new Map(), 2: new Map() }, famN = new Map();
+    if (freeTop) for (const t of teachers) { const f = famOfT.get(t.id); famN.set(f, (famN.get(f) || 0) + 1); for (const sem of [1, 2]) famSum[sem].set(f, (famSum[sem].get(f) || 0) + st.get(t.id).tot[sem]); }
+    const effTot = (t, x, sem) => freeTop ? 0.5 * x.tot[sem] + 0.5 * (famSum[sem].get(famOfT.get(t.id)) / famN.get(famOfT.get(t.id))) : x.tot[sem];
     // 단위: 분반(한 학기) · 지정 과목(같은 반·같은 계열 과목이 두 학기에 있으면 한 교사가 두 학기를 이어 맡도록 묶음)
     const units = [];
     for (const sem of sems) for (const u of U[sem]) if (u.kind === 'sec') units.push({ ...u, kind: 'sec', parts: [{ sem, h: u.h }] });
@@ -3437,12 +3498,13 @@ function autoAssign(S, semArg, opts = {}) {
             if (after > cs[p.sem][u.g]) { okT = false; break; }                                                     // 그 학년 학급별 수업 시간 초과
             const r = after / Math.max(1, cs[p.sem][u.g]); if (r > 0.75) s += 30 * (r - 0.75);                     // 빠듯하면 배치가 어려워짐
           }
-          s += 0.25 * p.h * (2 * x.tot[p.sem] + p.h - 2 * target[p.sem]);                                         // 시수 균형(한계 비용)
-          if (x.tot[p.sem] + p.h > std + 2) s += 12 * (x.tot[p.sem] + p.h - std - 2);                              // 기준 시수 크게 넘김
+          s += (freeTop ? 1 : 0.25) * p.h * (2 * effTot(t, x, p.sem) + p.h - 2 * target[p.sem]);                 // 시수 균형(한계 비용) — 교양 배분은 균형이 우선
+          const lim = freeTop ? std : std + 2;
+          if (x.tot[p.sem] + p.h > lim) s += 12 * (x.tot[p.sem] + p.h - lim);                                      // 기준 시수 넘김(교양은 기준부터, 교과 과목은 기준+2부터)
         }
         if (!okT) continue;
         const key = u.g + ':' + baseSubj(u.name);
-        if (x.subj.has(key)) s -= 8; else s += 3 * x.subj.size;                                                     // 같은 과목 이어 맡기 · 준비 과목 수
+        if (x.subj.has(key)) s -= freeTop ? 3 : 8; else s += 3 * x.subj.size;                                       // 같은 과목 이어 맡기 · 준비 과목 수
         if (!x.grades.has(u.g)) s += 4 * x.grades.size;                                                             // 여러 학년
         if (u.prev && u.prev === t.id) s -= 20;                                                                     // 다른 학기 같은 반 같은 계열 과목
         s += teachers.indexOf(t) * 1e-3;
@@ -3455,6 +3517,7 @@ function autoAssign(S, semArg, opts = {}) {
         if (u.kind === 'sec') { A.sec[u.key] = { t: best.id, a: 1 }; if (u.b != null) x.blk[p.sem].add(u.gid + ':' + u.b); }
         else { const perC = A.des[p.sid] = A.des[p.sid] || {}; (perC[u.c] = perC[u.c] || []).push({ t: best.id, h: null, a: 1 }); x.desG[p.sem][u.g] += p.h; }
         x.tot[p.sem] += p.h; res.hours += p.h;
+        if (freeTop) famSum[p.sem].set(famOfT.get(best.id), famSum[p.sem].get(famOfT.get(best.id)) + p.h);
       }
       x.subj.add(u.g + ':' + baseSubj(u.name)); x.grades.add(u.g);
       res.assigned++;
@@ -3580,7 +3643,7 @@ function ttBalanceLoads(S, sem, opts = {}) {
     for (const I of items) {
       const o = I.o, H = I.H;
       for (const u of TM.candOf(I.deptId)) {
-        if (u === o) continue;
+        if (u === o || TM.top[u] !== TM.top[o]) continue;                // 같은 교과 묶음 안에서만(교양 배분 수업도 묶음 밖으로는 넘기지 않음)
         const gap = load[o] - load[u]; if (gap < 2) continue;
         if (I.kind === 'sec') {
           if (gap - H < 1 || !freeAll(I.ts, u)) continue;
@@ -3680,6 +3743,154 @@ function famLoadInfo(S, sem, top) {
   for (const x of ts) for (const i of x.items) if (i.kind === 'des' && i.h < i.full) { const k = `${i.g}|${i.sid}|${i.c}`; if (!split.has(k)) split.set(k, { g: i.g, name: i.name, c: i.c, full: i.full, parts: [] }); split.get(k).parts.push({ name: x.t.name, h: i.h, a: i.a }); }
   return { n: ts.length, min: tot.length ? Math.min(...tot) : 0, max: tot.length ? Math.max(...tot) : 0, sum: sum(tot, x => x), split: [...split.values()].filter(x => x.parts.length >= 2).sort((a, b) => a.g - b.g || String(a.name).localeCompare(String(b.name)) || a.c - b.c) };
 }
+/* 교사 한 사람의 담당 수업 요약: '1학년 공통국어1 1·2·3반(2h) · 2학년 매체 의사소통 1·2분반 · 3학년 독서와 작문 전 반(1h)' */
+function teacherItemsText(S, sem, x, opts = {}) {
+  const tcs = {}; const nTargets = (g, sid) => { tcs[g] = tcs[g] || calcTerm(S, g, sem); const d = tcs[g].des.find(z => z.sj.id === sid); return d ? d.targets.length : 0; };
+  const groups = new Map();
+  for (const i of x.items) {
+    const k = i.kind === 'des' ? `${i.g}|d|${i.sid}|${i.h < i.full ? i.h : ''}` : `${i.g}|s|${i.sid}`;
+    if (!groups.has(k)) groups.set(k, { g: i.g, kind: i.kind, sid: i.sid, name: i.name + (isFreeDept(S, i.dept) ? '(교양)' : ''), h: i.kind === 'des' && i.h < i.full ? i.h : 0, full: i.full, list: [] });
+    groups.get(k).list.push(i.kind === 'des' ? i.c : i.n);
+  }
+  const out = [...groups.values()].sort((a, b) => a.g - b.g || (a.kind === 'des' ? 0 : 1) - (b.kind === 'des' ? 0 : 1) || String(a.name).localeCompare(String(b.name)) || b.h - a.h);
+  return out.map(G => {
+    G.list.sort((a, b) => a - b);
+    const where = G.kind === 'des' ? (G.list.length >= 2 && G.list.length === nTargets(G.g, G.sid) ? '전 반' : G.list.join('·') + '반') : G.list.join('·') + '분반';
+    return `${opts.grade === false ? '' : `${G.g}학년 `}${G.name} ${where}${G.h ? `(${G.h}h)` : ''}`;
+  }).join(opts.sep || ' · ');
+}
+
+/* ---------- 담당 수업 체크표(교사 1명 · 학기) ----------
+   교과 협의로 시수를 나눌 때 교사마다 학년별·학급별로 체크해서 정함(예: 1학년 1·2·3반 2시간씩, 2학년 분반 2개, 3학년 전 반 1시간씩 통반).
+   체크한 내용은 지정 과목 반별 담당(S.assign.des: 시간 나누기 포함)과 분반 담당(S.assign.sec)에 그대로 들어가 시간표 배치·시수·안내에 바로 반영됨.
+   M = { t, top, sem, std, grades: [{ g, classes, cs, rows: [
+       { kind:'des', sid, name, dept, fit, cr, cells: [{ c, h(이 교사 시간, 0=안 맡음), a, others:[{t,name,h,a}], left }] },
+       { kind:'sec', sid, name, dept, fit, cr, gid, gname, pick, cells: [{ n, key, b, mine, a, other:{t,name,a}|null }] } ] }] }
+   pick = { des: { [sid]: { [반]: 시간 } }, sec: { [분반키]: 1 } }  — 이 교사가 맡을 수업 */
+function teacherMatrix(S, sem, tid) {
+  const tmap = teacherMap(S); const t = tmap.get(tid); if (!t) return null;
+  const top = deptTop(S, t.dept); const fam = new Set(familyDeptIds(S, top));
+  const A = asgRead(S, sem); const cs = gradeCommonSlotsFor(S, sem);
+  const grades = [];
+  for (const gr of S.grades) {
+    if (!gr.classes) continue;
+    const tc = calcTerm(S, gr.g, sem);
+    const rows = [];
+    for (const d of tc.des) {
+      const cr = +d.sj.cr || 0;
+      const free = isFreeDept(S, d.sj.dept);
+      if ((!fam.has(d.sj.dept) && !free) || !(d.sec > 0) || !(cr > 0)) continue;
+      const fit = teacherFit(S, d.sj.dept, t); if (fit >= 9) continue;
+      const cells = d.targets.map(c => {
+        const r = resolveDesParts((A.des[d.sj.id] || {})[c], cr, tmap);
+        const mine = r.parts.find(p => p.t === tid);
+        return { c, h: mine ? mine.h : 0, a: !!(mine && mine.a), others: r.parts.filter(p => p.t !== tid).map(p => ({ t: p.t, name: tmap.get(p.t).name, h: p.h, a: !!p.a })), left: r.left };
+      });
+      rows.push({ kind: 'des', sid: d.sj.id, name: d.sj.name, dept: d.sj.dept, fit, free, cr, cells });
+    }
+    for (const gc of tc.groups) {
+      if (!(gc.K > 0)) continue;
+      const rec = S.blocks[gc.G.id] || {};
+      for (const row of gc.rows) {
+        const free = isFreeDept(S, row.sj.dept);
+        if (!(row.sec > 0) || (!fam.has(row.sj.dept) && !free)) continue;
+        const fit = teacherFit(S, row.sj.dept, t); if (fit >= 9) continue;
+        const cells = range(row.sec).map(i => {
+          const n = i + 1, key = row.sj.id + ':' + n; const cur = secTeacherId(A, key, tmap); const e = A.sec[key];
+          return { n, key, b: rec.assign && rec.assign[key] != null ? rec.assign[key] : null, mine: cur === tid, a: !!(cur === tid && e && e.a), other: cur && cur !== tid ? { t: cur, name: tmap.get(cur).name, a: !!(e && e.a) } : null };
+        });
+        rows.push({ kind: 'sec', sid: row.sj.id, name: row.sj.name, dept: row.sj.dept, fit, free, cr: Math.max(0, +gc.cr || 0), gid: gc.G.id, gname: gc.G.name, pick: gc.pick, cells });
+      }
+    }
+    rows.sort((a, b) => (a.free ? 1 : 0) - (b.free ? 1 : 0));   // 교과 과목 먼저, 교양(배분) 과목은 뒤에
+    if (rows.length) grades.push({ g: gr.g, classes: gr.classes, cs: cs[gr.g], rows });
+  }
+  return { t, top, sem, std: Math.max(1, +S.rules.std || 18), grades };
+}
+/* 지금 배정에서 이 교사의 체크 상태 */
+function teacherMatrixPick(M) {
+  const pick = { des: {}, sec: {} };
+  if (!M) return pick;
+  for (const G of M.grades) for (const row of G.rows) {
+    if (row.kind === 'des') { for (const cell of row.cells) if (cell.h > 0) (pick.des[row.sid] = pick.des[row.sid] || {})[cell.c] = cell.h; }
+    else for (const cell of row.cells) if (cell.mine) pick.sec[cell.key] = 1;
+  }
+  return pick;
+}
+const pickDesH = (pick, sid, c, cr) => Math.max(0, Math.min(cr, (((pick && pick.des) || {})[sid] || {})[c] | 0));
+/* 체크 상태의 학년별·전체 시수와 경고(학급 수업 칸 초과·같은 블록 분반·다른 교사 몫 줄어듦·기준 초과) */
+function teacherMatrixCheck(S, sem, tid, pick, M) {
+  M = M || teacherMatrix(S, sem, tid); if (!M) return null;
+  const byG = {}, warns = []; let total = 0, takeAuto = 0, trims = 0, cross = 0, libH = 0;
+  for (const G of M.grades) {
+    const o = { des: 0, sec: 0, cs: G.cs, overCs: false, blk: new Map() };
+    for (const row of G.rows) {
+      if (row.kind === 'des') {
+        for (const cell of row.cells) {
+          const h = pickDesH(pick, row.sid, cell.c, row.cr); if (!h) continue;
+          o.des += h; if (row.fit === 2) cross++; if (row.free) libH += h;
+          const man = cell.others.filter(x => !x.a), auto = cell.others.filter(x => x.a);
+          const manH = sum(man, x => x.h);
+          if (manH + h > row.cr) { trims++; warns.push({ k: 'warn', t: `${G.g}학년 ${cell.c}반 ${row.name}: ${man.map(x => `${x.name} ${x.h}h`).join('·')}(직접 정함)와 합하면 ${row.cr}시간을 넘습니다. 저장하면 다른 교사 몫이 ${Math.max(0, row.cr - h)}시간으로 줄어듭니다.` }); }
+          else if (auto.length && sum(auto, x => x.h) + manH + h > row.cr) takeAuto++;
+        }
+      } else {
+        for (const cell of row.cells) {
+          if (!pick.sec || !pick.sec[cell.key]) continue;
+          o.sec += row.cr; if (row.fit === 2) cross++; if (row.free) libH += row.cr;
+          if (cell.other && cell.other.a) takeAuto++;
+          if (cell.b != null) { const k = row.gid + ':' + cell.b; const v = o.blk.get(k) || { gname: row.gname, b: cell.b, n: 0, names: [] }; v.n++; v.names.push(`${row.name} ${cell.n}분반`); o.blk.set(k, v); }
+        }
+      }
+    }
+    if (o.cs != null && o.des > o.cs) { o.overCs = true; warns.push({ k: 'bad', t: `${G.g}학년 학급 수업 ${o.des}시간이 학급별 수업 칸 ${o.cs}교시/주보다 많습니다. 같은 시간에 두 반에 들어가야 하므로 ${G.g}학년 반 수업을 ${o.cs}시간 이하로 줄이세요.` }); }
+    for (const [, v] of o.blk) if (v.n > 1) warns.push({ k: 'bad', t: `${G.g}학년 ${v.gname} ${BL[v.b]}블록에서 분반 ${v.n}개(${v.names.join(', ')})를 맡으면 같은 시간에 겹칩니다. 다른 분반을 고르거나 [블록 편성]에서 분반을 옮기세요.` });
+    o.total = o.des + o.sec; total += o.total; byG[G.g] = o;
+  }
+  if (total > M.std) warns.push({ k: 'warn', t: `${sem}학기 주 ${total}시간으로 기준 ${M.std}시간보다 ${total - M.std}시간 많습니다.` });
+  if (cross) warns.push({ k: 'info', t: `상치 과목 ${cross}칸이 들어 있습니다(전공이 다른 교사).` });
+  if (libH) warns.push({ k: 'info', t: `교양 과목 ${libH}시간을 배분받습니다(전공 교사가 없는 과목).` });
+  if (takeAuto) warns.push({ k: 'info', t: `자동 배정(추천)으로 다른 교사에게 가 있던 ${takeAuto}칸을 이 교사가 맡습니다.` });
+  return { byG, total, std: M.std, warns, hard: warns.filter(w => w.k === 'bad').length, trims, takeAuto, libH };
+}
+/* 체크 상태를 배정에 쓰기: 바뀐 칸만(그대로인 칸은 자동 표시도 유지), 쓴 칸은 직접 정한 칸. 다른 교사 몫은 남는 시간 안에서(자동 배정 칸부터 줄임) */
+function applyTeacherMatrix(S, sem, tid, pick, M) {
+  M = M || teacherMatrix(S, sem, tid); if (!M) return null;
+  const tmap = teacherMap(S); const A = asgOf(S, sem);
+  const out = { sem, set: 0, cleared: 0, hours: 0, trimmed: [], taken: [] };
+  for (const G of M.grades) for (const row of G.rows) {
+    if (row.kind === 'des') {
+      for (const cell of row.cells) {
+        const h = pickDesH(pick, row.sid, cell.c, row.cr);
+        if (h === cell.h) continue;
+        const per = A.des[row.sid] = A.des[row.sid] || {};
+        const raw = (per[cell.c] || []).filter(p => p && tmap.has(p.t) && p.t !== tid);
+        if (!h) { if (raw.length) per[cell.c] = raw; else delete per[cell.c]; out.cleared++; }
+        else {
+          let left = row.cr - h; const kept = [];
+          const others = resolveDesParts(raw, row.cr, tmap).parts.sort((a, b) => (a.a ? 1 : 0) - (b.a ? 1 : 0));
+          for (const p of others) {
+            const hh = Math.min(left, p.h);
+            if (hh < p.h) out.trimmed.push({ g: G.g, name: row.name, c: cell.c, t: p.t, tname: tmap.get(p.t).name, from: p.h, to: hh, a: p.a });
+            if (hh > 0) { kept.push(p.a ? { t: p.t, h: hh, a: 1 } : { t: p.t, h: hh }); left -= hh; }
+          }
+          per[cell.c] = [{ t: tid, h: h >= row.cr ? null : h }, ...kept];
+          out.set++;
+        }
+        out.hours += h - cell.h;
+        if (!Object.keys(per).length) delete A.des[row.sid];
+      }
+    } else {
+      for (const cell of row.cells) {
+        const on = !!(pick.sec && pick.sec[cell.key]);
+        if (on === cell.mine) continue;
+        if (on) { if (cell.other) out.taken.push({ g: G.g, name: row.name, n: cell.n, t: cell.other.t, tname: cell.other.name, a: cell.other.a }); A.sec[cell.key] = { t: tid }; out.set++; out.hours += row.cr; }
+        else { delete A.sec[cell.key]; out.cleared++; out.hours -= row.cr; }
+      }
+    }
+  }
+  return out;
+}
 
 /* ==========================================================
    교과별 기초 시간표 설계 안내(추천) — 모든 교과 조건을 함께 넣은 하나의 배치에서 교과마다 뽑음
@@ -3771,7 +3982,7 @@ function dgRecommend(S, sem, M, st, ev, D) {
     const items = (L.loads.get(o.t.id) || { items: [] }).items.slice().sort((a, b) => a.h - b.h);
     for (const it of items) {
       if (state.get(o.t.id).tot <= std) break;
-      const unders = D.teachers.filter(u => u.t.id !== o.t.id && teacherFit(S, it.dept, u.t) <= 1).sort((a, b) => state.get(a.t.id).tot - state.get(b.t.id).tot);
+      const unders = D.teachers.filter(u => u.t.id !== o.t.id && fitOk(teacherFit(S, it.dept, u.t))).sort((a, b) => state.get(a.t.id).tot - state.get(b.t.id).tot);
       const u = unders.find(u2 => { const s2 = state.get(u2.t.id); if (s2.tot + it.h > std) return false; if (it.kind === 'des') return cs2[it.g] == null || s2.desG[it.g] + it.h <= cs2[it.g]; return it.b == null || !s2.blk.has(it.gid + ':' + it.b); });
       if (!u) continue;
       const so = state.get(o.t.id), su = state.get(u.t.id);
@@ -3793,7 +4004,7 @@ function dgRecommend(S, sem, M, st, ev, D) {
     const fi = famLoadInfo(S, sem, D.top), gap = fi.max - fi.min, unit = +S.rules.split || 0;
     if (fi.split.length) out.push({ k: 'tip', t: `시수를 맞추려고 두 교사가 나누어 맡는 반 ${fi.split.length}곳: ${fi.split.slice(0, 6).map(x => `${x.g}학년 ${x.name} ${x.c}반(${x.parts.map(p => `${p.name} ${p.h}`).join('·')})`).join(', ')}${fi.split.length > 6 ? ' 등' : ''} — 진도·평가 계획은 두 교사가 함께 세우세요.` });
     const tMax = D.teachers.reduce((a, x) => (x.total > a.total ? x : a)), tMin = D.teachers.reduce((a, x) => (x.total < a.total ? x : a));
-    const movable = tMax.items.some(i => i.kind === 'des' && i.a && teacherFit(S, i.dept, tMin.t) <= 1);
+    const movable = tMax.items.some(i => i.kind === 'des' && i.a && fitOk(teacherFit(S, i.dept, tMin.t)));
     const teachNm = typeof navTitle === 'function' ? navTitle('teach') : '교사별 수업 배정', ttNm = typeof navTitle === 'function' ? navTitle('tt') : '시간표·운영 판정';
     if (!unit && gap > 2 && movable) out.push({ k: 'tip', t: `교사 시수 차이 ${gap}시간(${fi.min}~${fi.max}시간) — 한 반 수업을 두 교사가 나누어 맡으면(예: 4시간 = 2 + 2) 줄일 수 있습니다. [${teachNm}]의 '시수 맞추기'에서 나누기 단위를 고르고 [시수 고르게 맞추기]를 누르세요.` });
     else if (unit && gap > Math.max(2, unit + 1)) out.push({ k: 'tip', t: movable
@@ -5525,7 +5736,7 @@ PANELS.depts = {
       <div class="row"><button class="btn" data-act="dept-add">+ 교과 추가</button></div></div>
       ${none ? `<div class="note warn mb12">담당 교과가 지정되지 않은 과목 시수가 있습니다(1학기 ${H1.none.length}개, 2학기 ${H2.none.length}개 과목). [편제·수강신청]에서 교과를 지정하세요.</div>` : ''}
       <div class="card"><div class="tbl-wrap"><table class="tbl compact"><thead><tr><th>교과(전공)</th><th>상위 교과</th><th>교원 수</th><th title="여러 교과 교사가 나누어 맡는 과목 묶음(예: 교양). 동시 수업 점검에서 제외">겸임(점검 제외)</th><th>1학기 시수</th><th>2학기 시수</th><th>과목 수</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
-      <div class="note mt12 small"><b>교원 수</b>는 동시에 수업할 수 있는 사람 수(정규·기간제·강사 포함)입니다. 상위 교과(예: 사회)에 직접 적은 교원은 묶음 전체 과목을 맡을 수 있는 교원으로 봅니다. <b>겸임</b>으로 표시한 교과(예: 교양)는 시수는 계산하되 시간표의 교사 동시 수요 점검에서는 제외합니다.</div></div>`;
+      <div class="note mt12 small"><b>교원 수</b>는 동시에 수업할 수 있는 사람 수(정규·기간제·강사 포함)입니다. 상위 교과(예: 사회)에 직접 적은 교원은 묶음 전체 과목을 맡을 수 있는 교원으로 봅니다. <b>겸임</b>으로 표시한 교과(예: 교양)는 전공 교사가 따로 없는 과목 묶음으로, 시수는 계산하되 교과 단위 교사 점검에서는 제외하고 [${esc(navTitle('teach'))}]의 '교양' 탭에서 시수가 적은 교과 교사에게 반마다 나누어 맡깁니다(배분한 뒤에는 그 교사 기준으로 점검). <b>진로상담</b>은 진로와 직업·진로·학업 설계처럼 진로전담 교사가 맡는 과목의 교과입니다(교원 수 = 진로전담 교사 수).</div></div>`;
   },
 };
 ACTIONS['dept-add'] = () => commit(S => { S.depts.push({ id: uid('d'), name: '새 교과', t: 0, parent: null, free: false }); });
@@ -6106,12 +6317,14 @@ ACTIONS['hours-sem'] = el => { const v = el.getAttribute('data-v'); App.ui.hours
    - 자동 배정(추천): 빈 칸을 채우고, 시간표를 함께 계산해 교사 겹침이 생기는 칸은 다른 교사로 바꿔 추천
    ========================================================== */
 function teachTops(S) {
-  return S.depts.filter(d => !d.free && (!d.parent || !deptOf(S, d.parent))).filter(d => {
+  const tops = S.depts.filter(d => !d.parent || !deptOf(S, d.parent)).filter(d => {
     const fam = new Set(familyDeptIds(S, d.id));
-    const hasT = (S.teachers || []).some(t => fam.has(t.dept)) || S.depts.some(x => fam.has(x.id) && (+x.t || 0) > 0);
     const hasS = TERM_KEYS.some(k => S.terms[k].subjects.some(x => fam.has(x.dept)) || S.terms[k].groups.some(G => G.subjects.some(x => fam.has(x.dept))));
+    if (d.free) return hasS && (S.teachers || []).some(t => t.dept && !isFreeDept(S, t.dept));   // 겸임 교과(교양): 과목이 있으면 '배분' 탭
+    const hasT = (S.teachers || []).some(t => fam.has(t.dept)) || S.depts.some(x => fam.has(x.id) && (+x.t || 0) > 0);
     return hasT && hasS;
   });
+  return [...tops.filter(d => !d.free), ...tops.filter(d => d.free)];
 }
 function teachSel() {
   const S = App.S; const tops = teachTops(S);
@@ -6123,14 +6336,20 @@ function teachPct(S, sem) {
   const asgH = sum([...L.loads.values()], x => x.total), unH = sum(L.unassigned.filter(u => tops.has(deptTop(S, u.dept))), u => u.h);
   return { asgH, unH, pct: asgH + unH ? Math.round(asgH / (asgH + unH) * 100) : 0 };
 }
-/* 그 과목을 맡을 수 있는 교사(전공 → 상위 교과 → 상치 순) */
+/* 그 과목을 맡을 수 있는 교사(전공 → 상위 교과 → 상치 순). 교양처럼 겸임 교과 과목은 모든 교과 교사(배분) */
 function teacherChoices(S, subjDept, fam) {
-  return (S.teachers || []).filter(t => fam.has(t.dept)).map(t => ({ t, fit: teacherFit(S, subjDept, t) })).filter(x => x.fit < 9).sort((a, b) => a.fit - b.fit);
+  const free = isFreeDept(S, subjDept);
+  return (S.teachers || []).filter(t => t.dept && (free ? !isFreeDept(S, t.dept) : fam.has(t.dept))).map(t => ({ t, fit: teacherFit(S, subjDept, t) })).filter(x => x.fit < 9).sort((a, b) => a.fit - b.fit);
 }
-function teacherOptionsHTML(S, subjDept, fam, cur, extra = []) {
+/* o.loads = teacherLoads(S, sem).loads → 교양 배분처럼 모든 교사 중에서 고를 때 교과별 묶음·시수를 함께 보임 */
+function teacherOptionsHTML(S, subjDept, fam, cur, extra = [], o = {}) {
   const ch = teacherChoices(S, subjDept, fam);
-  const opts = [['', '— 미배정']].concat(ch.map(x => [x.t.id, x.t.name + (x.fit === 2 ? ' (상치)' : '')]), extra);
-  return opts.map(([v, t]) => `<option value="${esc(v)}"${String(v) === String(cur || '') ? ' selected' : ''}>${esc(t)}</option>`).join('');
+  const opt = ([v, t]) => `<option value="${esc(v)}"${String(v) === String(cur || '') ? ' selected' : ''}>${esc(t)}</option>`;
+  if (!isFreeDept(S, subjDept)) return [['', '— 미배정']].concat(ch.map(x => [x.t.id, x.t.name + (x.fit === 2 ? ' (상치)' : '')]), extra).map(opt).join('');
+  const byTop = new Map();
+  for (const x of ch) { const top = deptTop(S, x.t.dept); if (!byTop.has(top)) byTop.set(top, []); byTop.get(top).push(x.t); }
+  const lab = t => `${t.name}${o.loads && o.loads.get(t.id) ? ` · ${o.loads.get(t.id).total}h` : ''}`;
+  return opt(['', '— 미배정']) + [...byTop.entries()].map(([top, ts]) => `<optgroup label="${esc(deptOf(S, top) ? deptOf(S, top).name : '')}">${ts.map(t => opt([t.id, lab(t)])).join('')}</optgroup>`).join('') + extra.map(opt).join('');
 }
 /* 학기·학년 학급별 수업 칸 수(한 교사가 그 학년 학급 수업을 이보다 많이 맡을 수 없음) */
 function gradeCommonSlots(S, sem) {
@@ -6183,7 +6402,7 @@ PANELS.teach = {
       const fam = new Set(familyDeptIds(S, d.id));
       const n = (S.teachers || []).filter(t => fam.has(t.dept)).length;
       const un = sum(L.unassigned.filter(u => fam.has(u.dept)), u => u.h);
-      return `<button data-act="teach-top" data-v="${esc(d.id)}" class="${d.id === top ? 'on' : ''}">${esc(d.name)} <span class="cnt">${n}명${un ? ` · 미배정 ${un}` : ''}</span></button>`;
+      return `<button data-act="teach-top" data-v="${esc(d.id)}" class="${d.id === top ? 'on' : ''}">${esc(d.name)} <span class="cnt">${d.free ? '배분' : `${n}명`}${un ? ` · 미배정 ${un}` : ''}</span></button>`;
     }).join('')}</div>`;
     const T = deptOf(S, top); const famIds = familyDeptIds(S, top); const fam = new Set(famIds);
     const teachers = (S.teachers || []).filter(t => fam.has(t.dept));
@@ -6198,16 +6417,18 @@ PANELS.teach = {
       for (const g of [1, 2, 3]) if (cs[g] != null && desG[g] > cs[g]) st.push(badge(`${g}학년 학급 수업 ${desG[g]} > ${cs[g]}교시`, 'bad'));
       const cl = clashes.filter(c => c.t.id === t.id); if (cl.length) st.push(badge(`블록 겹침 ${cl.map(c => `${c.g}학년 ${BL[c.b]}`).join(',')}`, 'bad'));
       if (x.items.some(i => teacherFit(S, i.dept, t) === 2)) st.push(badge('상치', 'info'));
+      const libH = sum(x.items.filter(i => isFreeDept(S, i.dept)), i => i.h); if (libH) st.push(badge(`교양 ${libH}h`, 'info'));
       const sp = x.items.filter(i => i.kind === 'des' && i.h < i.full).length; if (sp) st.push(badge(`나눔 ${sp}반`, 'info'));
       const subj = [...new Set(x.items.map(i => i.name))];
       const blocks = fmtBlockList(x.blocks);
       const bar = Math.min(100, Math.round(x.total / Math.max(std, 1) * 100));
+      const itemsTxt = teacherItemsText(S, sem, x);
       return `<tr><td>${inText(`teachers.#${t.id}.name`, t.name, { w: 'w100', label: '교사 이름' })}</td>
         <td>${famIds.length > 1 ? inSelect(`teachers.#${t.id}.dept`, t.dept, famDeptOpts, { label: '전공' }) : esc(deptOf(S, t.dept).name)}</td>
         ${[1, 2, 3].map(g => `<td class="c num">${x.byG[g] || ''}</td>`).join('')}
         <td class="c num"><b>${x.total}</b><div class="loadbar" title="기준 ${std}시간 대비"><span style="width:${bar}%" class="${x.total > std ? 'over' : ''}"></span></div></td>
         <td class="c num muted">${xo.total}</td>
-        <td class="small">${subj.map(esc).join(', ') || '<span class="muted">–</span>'}${subj.length >= 3 ? ` ${badge(`${subj.length}과목`, 'info')}` : ''}</td>
+        <td class="small teach-items"><button class="btn xs" data-act="teach-matrix" data-id="${esc(t.id)}" title="학년별·학급별로 체크해서 이 교사가 맡을 수업을 정합니다">체크표</button> ${itemsTxt ? esc(itemsTxt) : '<span class="muted">–</span>'}${subj.length >= 3 ? ` ${badge(`${subj.length}과목`, 'info')}` : ''}</td>
         <td class="small">${esc(blocks) || '<span class="muted">–</span>'}</td>
         <td class="c"><button class="btn xs" data-act="teach-off" data-id="${esc(t.id)}" title="출장·겸임·시간 강사 출근 요일 등 수업할 수 없는 시간">${(t.off || []).length ? `${t.off.length}칸` : '설정'}</button></td>
         <td class="small">${st.join(' ')}</td>
@@ -6215,12 +6436,12 @@ PANELS.teach = {
     }).join('');
     const fi = famLoadInfo(S, sem, top), gapF = fi.max - fi.min;
     const rangeB = teachers.length >= 2 && fi.sum > 0 ? `${badge(`${sem}학기 ${fi.min}~${fi.max}시간 · 차이 ${gapF}`, gapF <= Math.max(1, +S.rules.split || 2) ? 'good' : gapF <= 4 ? 'warn' : 'bad')}${fi.split.length ? ` ${badge(`나누어 맡는 반 ${fi.split.length}`, 'info')}` : ''}` : '';
-    const famCard = `<div class="card mt12"><h3>${esc(T.name)} 교사 ${teachers.length}명 ${rangeB}<span class="grow"></span>
+    const famCard = T.free ? freeDistCard(S, sem, top, L) : `<div class="card mt12"><h3>${esc(T.name)} 교사 ${teachers.length}명 ${rangeB}<span class="grow"></span>
         <label class="fld inline small">전공 <select class="inp" id="teachAddDept">${famDeptOpts.map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join('')}</select></label><button class="btn sm" data-act="teach-add">+ 교사 추가</button>
         <button class="btn sm" data-act="teach-auto" data-top="${esc(top)}" data-redo="1" title="이 교과의 자동 배정(추천) 칸만 다시 추천">이 교과 다시 추천</button>
         <button class="btn sm danger" data-act="teach-clear" data-top="${esc(top)}">이 교과 배정 지우기</button></h3>
-      <p class="card-sub">이름은 바꿔 쓸 수 있습니다(예: 김○○). 1·2·3학년은 ${sem}학기 주당 시간, '다른 학기'는 ${sem === 1 ? 2 : 1}학기 계입니다. 상위 교과(공통) 과목(예: 통합사회)은 묶음 안 누구나, 전공 과목은 그 전공 교사가 맡는 것을 기본으로 추천합니다.</p>
-      <div class="tbl-wrap"><table class="tbl compact" id="teachTbl"><thead><tr><th>교사</th><th>전공</th><th>1학년</th><th>2학년</th><th>3학년</th><th>${sem}학기 계</th><th>다른 학기</th><th>맡은 과목</th><th>블록</th><th>수업 불가</th><th>점검</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="12" class="c muted">교사가 없습니다. [+ 교사 추가]를 누르세요.</td></tr>'}</tbody></table></div></div>`;
+      <p class="card-sub">이름은 바꿔 쓸 수 있습니다(예: 김○○). 1·2·3학년은 ${sem}학기 주당 시간, '다른 학기'는 ${sem === 1 ? 2 : 1}학기 계입니다. 교과 협의로 시수를 나눌 때는 교사마다 <b>[체크표]</b>를 열어 학년별·학급별로 맡을 반(시간)과 분반을 체크하세요(예: 1학년 1·2·3반 2시간씩, 2학년 분반 2개, 3학년 전 반 1시간씩). 상위 교과(공통) 과목(예: 통합사회)은 묶음 안 누구나, 전공 과목은 그 전공 교사가 맡는 것을 기본으로 추천합니다.</p>
+      <div class="tbl-wrap"><table class="tbl compact" id="teachTbl"><thead><tr><th>교사</th><th>전공</th><th>1학년</th><th>2학년</th><th>3학년</th><th>${sem}학기 계</th><th>다른 학기</th><th>담당 수업</th><th>블록</th><th>수업 불가</th><th>점검</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="12" class="c muted">교사가 없습니다. [+ 교사 추가]를 누르세요.</td></tr>'}</tbody></table></div></div>`;
     // 지정 과목 배정표
     let desHtml = '';
     for (const gr of S.grades) {
@@ -6242,10 +6463,10 @@ PANELS.teach = {
             return `<td class="c"><button class="btn xs split${auto ? ' auto' : ''}" data-act="teach-split" data-sid="${esc(d.sj.id)}" data-c="${c}" data-g="${gr.g}" title="시간 나누기 고치기">${esc(txt)}</button></td>`;
           }
           const cur = r.parts[0] ? r.parts[0].t : '';
-          return `<td class="c"><select class="inp asg asg-des${auto ? ' auto' : ''}${cur ? '' : ' empty'}" data-sid="${esc(d.sj.id)}" data-c="${c}" data-g="${gr.g}" aria-label="${gr.g}학년 ${c}반 ${esc(d.sj.name)} 담당">${teacherOptionsHTML(S, d.sj.dept, fam, cur, [['__split', '시간 나누기…']])}</select></td>`;
+          return `<td class="c"><select class="inp asg asg-des${auto ? ' auto' : ''}${cur ? '' : ' empty'}" data-sid="${esc(d.sj.id)}" data-c="${c}" data-g="${gr.g}" aria-label="${gr.g}학년 ${c}반 ${esc(d.sj.name)} 담당">${teacherOptionsHTML(S, d.sj.dept, fam, cur, [['__split', '시간 나누기…']], { loads: L.loads })}</select></td>`;
         }).join('');
-        return `<tr><td><b>${esc(d.sj.name)}</b><div class="xsmall muted">${esc(deptPath(S, d.sj.dept))} · ${cr}학점</div></td>${cells}
-          <td class="c"><select class="inp asg asg-row" data-sid="${esc(d.sj.id)}" data-g="${gr.g}" aria-label="${esc(d.sj.name)} 모든 반">${teacherOptionsHTML(S, d.sj.dept, fam, '', []).replace('— 미배정', '모든 반 →')}</select></td></tr>`;
+        return `<tr><td><b>${esc(d.sj.name)}</b><div class="xsmall muted">${esc(deptPath(S, d.sj.dept))} · ${cr}학점${T.free ? ' · 모든 교과 교사 중 선택' : ''}</div></td>${cells}
+          <td class="c"><select class="inp asg asg-row" data-sid="${esc(d.sj.id)}" data-g="${gr.g}" aria-label="${esc(d.sj.name)} 모든 반">${teacherOptionsHTML(S, d.sj.dept, fam, '', [], { loads: L.loads }).replace('— 미배정', '모든 반 →')}</select></td></tr>`;
       }).join('');
       desHtml += `<div class="card mt12"><h3>${gr.g}학년 ${sem}학기 지정 과목 <span class="badge">학급 수업 ${cs[gr.g] ?? '–'}교시/주</span></h3>
         <div class="tbl-wrap"><table class="tbl compact asg-tbl"><thead><tr><th>과목</th>${range(gr.classes).map(i => `<th>${i + 1}반</th>`).join('')}<th>한꺼번에</th></tr></thead><tbody>${body}</tbody></table></div></div>`;
@@ -6267,7 +6488,7 @@ PANELS.teach = {
             const key = r.sj.id + ':' + n; const e = A.sec[key]; const cur = e && tmap.has(e.t) ? e.t : '';
             const b = rec.assign ? rec.assign[key] : null;
             const bad = cur && b != null && clashKey.has(cur + '|' + gc.G.id + ':' + b);
-            return `<td class="c"><div class="sec-cell"><span class="chip bk${(b ?? 0) % 8}" title="${b != null ? `${BL[b]}블록` : '블록 미정'}">${b != null ? BL[b] : '?'}</span><select class="inp asg asg-sec${e && e.a ? ' auto' : ''}${cur ? '' : ' empty'}${bad ? ' bad' : ''}" data-key="${esc(key)}" aria-label="${esc(r.sj.name)} ${n}분반 담당">${teacherOptionsHTML(S, r.sj.dept, fam, cur)}</select></div></td>`;
+            return `<td class="c"><div class="sec-cell"><span class="chip bk${(b ?? 0) % 8}" title="${b != null ? `${BL[b]}블록` : '블록 미정'}">${b != null ? BL[b] : '?'}</span><select class="inp asg asg-sec${e && e.a ? ' auto' : ''}${cur ? '' : ' empty'}${bad ? ' bad' : ''}" data-key="${esc(key)}" aria-label="${esc(r.sj.name)} ${n}분반 담당">${teacherOptionsHTML(S, r.sj.dept, fam, cur, [], { loads: L.loads })}</select></div></td>`;
           }).join('');
           return `<tr><td><b>${esc(r.sj.name)}</b><div class="xsmall muted">${esc(deptPath(S, r.sj.dept))} · ${r.sec}분반</div></td>${cells}</tr>`;
         }).join('');
@@ -6296,6 +6517,33 @@ PANELS.teach = {
     root.querySelectorAll('select.asg-sec').forEach(sel => sel.onchange = () => commit(S2 => setSecTeacherState(S2, sem, sel.getAttribute('data-key'), sel.value || null)));
   },
 };
+/* 교양(겸임 교과) 배분 카드: 전공 교사가 없는 과목을 시수가 적은 교과 교사에게 나누어 맡김 */
+function freeDistCard(S, sem, top, L) {
+  const T = deptOf(S, top); const std = Math.max(1, +S.rules.std || 18);
+  const HS = hoursSummary(S);
+  const tops = S.depts.filter(d => !d.free && (!d.parent || !deptOf(S, d.parent)));
+  const rowsD = tops.map(d => {
+    const fam = new Set(familyDeptIds(S, d.id));
+    const ts = (S.teachers || []).filter(t => fam.has(t.dept));
+    const hs = HS.rows.find(r => r.d.id === d.id) || {};
+    const own = sem === 1 ? (hs.h1 || 0) : (hs.h2 || 0);
+    const lib = sum(ts, t => sum(L.loads.get(t.id).items.filter(i => isFreeDept(S, i.dept)), i => i.h));
+    const n = ts.length || (+d.t || 0);
+    const avg0 = n ? own / n : null, avg = n ? (own + lib) / n : null;
+    const room = n ? Math.round((std - avg) * n) : 0;
+    return { d, n, own, lib, avg0, avg, room, ts: ts.map(t => `${t.name} ${L.loads.get(t.id).total}h`).join(' · ') };
+  }).filter(r => r.n > 0).sort((a, b) => (b.room - a.room) || String(a.d.name).localeCompare(String(b.d.name)));
+  const un = L.unassigned.filter(u => isFreeDept(S, u.dept)), unH = sum(un, u => u.h);
+  const libItems = [...L.loads.values()].flatMap(x => x.items.filter(i => isFreeDept(S, i.dept)).map(i => ({ ...i, t: x.t })));
+  const trs = rowsD.map(r => `<tr><td><b>${esc(r.d.name)}</b></td><td class="c num">${r.n}</td><td class="c num">${r.own}</td><td class="c num">${r.avg0 != null ? fmt(r.avg0, 1) : '–'}</td><td class="c num">${r.lib || ''}</td><td class="c num"><b>${r.avg != null ? fmt(r.avg, 1) : '–'}</b></td><td class="c num ${r.room > 0 ? 'good-ink' : r.room < 0 ? 'warn-ink' : ''}">${fmtSigned(r.room)}</td><td class="small muted">${esc(r.ts)}</td></tr>`).join('');
+  return `<div class="card mt12"><h3>${esc(T.name)} 과목 배분 <span class="badge">${sem}학기 미배정 ${unH}시간</span>${libItems.length ? ` <span class="badge info">배분됨 ${sum(libItems, i => i.h)}시간</span>` : ''}<span class="grow"></span>
+      <button class="btn sm primary" data-act="teach-auto" data-top="${esc(top)}" title="교양 과목의 빈 칸을 시수가 적은 교사부터 채워 추천합니다(다른 교과 배정은 그대로)">시수 적은 교사부터 자동 배분(추천)</button>
+      <button class="btn sm" data-act="teach-auto" data-top="${esc(top)}" data-redo="1" title="교양 과목의 자동 배정(추천) 칸을 지우고 다시 추천">다시 배분</button>
+      <button class="btn sm danger" data-act="teach-clear" data-top="${esc(top)}">배분 지우기</button></h3>
+    <p class="card-sub">${esc(T.name)} 과목은 전공 교사가 따로 없어 <b>시수가 적은 교과의 교사</b>가 나누어 맡습니다. 아래 교과별 여유를 보고 반마다 교사를 고르거나(모든 교과 교사 중 선택, 선택지에 이번 학기 시수 표시), 각 교과 탭의 교사 <b>[체크표]</b> 아래쪽 '교양 배분' 줄에서 반·시간을 체크하세요. 한 반을 두 교사가 나누어 맡으면 '시간 나누기…'. 진로와 직업·진로·학업 설계처럼 진로전담 교사가 맡는 과목은 '진로상담' 교과 탭에서 정합니다.</p>
+    <div class="tbl-wrap"><table class="tbl compact"><thead><tr><th>교과</th><th>교원</th><th>${sem}학기 교과 시수</th><th>1인 평균</th><th>교양 배분</th><th>배분 뒤 평균</th><th>기준 대비 여유(시간)</th><th>교사별 ${sem}학기 시수</th></tr></thead><tbody>${trs || '<tr><td colspan="8" class="c muted">교원이 입력된 교과가 없습니다.</td></tr>'}</tbody></table></div>
+    <p class="xsmall muted mt8">여유 = (기준 ${std}시간 − 배분 뒤 1인 평균) × 교원 수. 여유가 큰 교과부터 맡기면 교과 간 시수가 고르게 됩니다. 자동 배분은 시수가 적은 교사부터 채우되 기준 시수를 넘기지 않게 하고, 두 학기 시간표를 함께 계산해 같은 시간에 겹치지 않는 교사에게 맡깁니다(진로전담 교사는 자동 배분에서 제외, 직접 고를 수는 있음).</p></div>`;
+}
 ACTIONS['teach-sem'] = el => { App.ui.teachSem = +el.getAttribute('data-v'); saveUI(); render(); };
 ACTIONS['teach-top'] = el => { App.ui.teachTop = el.getAttribute('data-v'); saveUI(); render(); };
 ACTIONS['teach-add'] = () => {
@@ -6327,7 +6575,8 @@ function openSplitModal(sem, sid, c) {
   if (!sj) return;
   const cr = +sj.cr || 0; const top = deptTop(S, sj.dept); const fam = new Set(familyDeptIds(S, top));
   const r = resolveDesParts((asgRead(S, sem).des[sid] || {})[c], cr, tmap);
-  const rows = [0, 1, 2].map(i => { const p = r.parts[i]; return `<div class="row mb8"><select class="inp sp-t" aria-label="교사 ${i + 1}">${teacherOptionsHTML(S, sj.dept, fam, p ? p.t : '')}</select><label class="fld inline">시간 <input class="inp num w50 sp-h" type="number" min="0" max="${cr}" value="${p ? p.h : ''}"></label></div>`; }).join('');
+  const loads = isFreeDept(S, sj.dept) ? teacherLoads(S, sem).loads : null;
+  const rows = [0, 1, 2].map(i => { const p = r.parts[i]; return `<div class="row mb8"><select class="inp sp-t" aria-label="교사 ${i + 1}">${teacherOptionsHTML(S, sj.dept, fam, p ? p.t : '', [], { loads })}</select><label class="fld inline">시간 <input class="inp num w50 sp-h" type="number" min="0" max="${cr}" value="${p ? p.h : ''}"></label></div>`; }).join('');
   openModal(`<h3>${g}학년 ${c}반 ${esc(sj.name)} 시간 나누기 <span class="badge">주 ${cr}시간</span></h3>
     <p class="small">한 반의 이 과목을 두 교사 이상이 나누어 맡을 때 교사마다 주당 시간을 적으세요(예: 통합과학1 4시간 = 물리 2 + 화학 2). 합이 ${cr}시간보다 적으면 나머지는 미배정입니다.</p>${rows}
     <p class="small muted" id="spSum"></p>
@@ -6343,6 +6592,126 @@ function openSplitModal(sem, sid, c) {
   });
 }
 ACTIONS['teach-split'] = el => { const { sem } = teachSel(); openSplitModal(sem, el.getAttribute('data-sid'), +el.getAttribute('data-c')); };
+/* ---------- 담당 수업 체크표(교사 1명 · 두 학기) ----------
+   학년별 과목 행마다 반(시간)·분반을 체크 → 저장하면 지정 과목 반별 담당(시간 나누기 포함)과 분반 담당에 들어가 시간표 배치에 바로 반영 */
+function openTeacherMatrixModal(tid, semInit) {
+  const S = App.S; const t = teacherMap(S).get(tid); if (!t) return;
+  if (ensureAllBlocks(S)) saveSoon();   // 분반의 블록 글자를 보이기 위해 블록 편성(아직 없으면 자동)
+  const M = { 1: teacherMatrix(S, 1, tid), 2: teacherMatrix(S, 2, tid) };
+  const D = { 1: teacherMatrixPick(M[1]), 2: teacherMatrixPick(M[2]) };
+  const rowH = {};   // 행마다 '모든 반' 시간(기본: 체크한 반의 시간 또는 학점)
+  let sem = semInit === 2 ? 2 : 1;
+  const fitTxt = f => f === 2 ? ` ${badge('상치', 'info')}` : f === 3 ? ` ${badge('교양 배분', 'info')}` : '';
+  const body = () => {
+    const X = M[sem], P = D[sem]; const o = sem === 1 ? 2 : 1;
+    const ck = teacherMatrixCheck(S, sem, tid, P, X), cko = teacherMatrixCheck(S, o, tid, D[o], M[o]);
+    const gTxt = [1, 2, 3].filter(g => ck.byG[g]).map(g => `${g}학년 ${ck.byG[g].total}`).join(' · ');
+    const sumHtml = `<div class="mx-sum"><span class="seg">${[1, 2].map(s => `<button data-mx="sem" data-v="${s}" class="${s === sem ? 'on' : ''}">${s}학기 <span class="cnt">${(s === sem ? ck : cko).total}시간</span></button>`).join('')}</span>
+        <span class="grow"><b>${sem}학기 주 ${ck.total}시간</b> <span class="muted">(기준 ${ck.std}시간${ck.total > ck.std ? `, <span class="ov">+${ck.total - ck.std}</span>` : ck.total < ck.std ? `, −${ck.std - ck.total}` : ''}) ${gTxt ? `· ${gTxt}` : ''} · ${o}학기 ${cko.total}시간 · 연간 평균 ${((ck.total + cko.total) / 2).toFixed(1)}</span></span></div>
+      ${ck.warns.length ? `<div class="mx-warns">${ck.warns.map(w => `<div class="note ${w.k === 'bad' ? 'bad' : w.k === 'warn' ? 'warn' : 'info'} small">${esc(w.t)}</div>`).join('')}</div>` : ''}`;
+    if (!X.grades.length) return sumHtml + `<div class="note mt8 small">${sem}학기에 이 교사가 맡을 수 있는 과목이 없습니다.</div>`;
+    const grades = X.grades.map(G => {
+      const o2 = ck.byG[G.g];
+      const des = G.rows.filter(r => r.kind === 'des'), secs = G.rows.filter(r => r.kind === 'sec');
+      let html = `<div class="mx-grade"><h4>${G.g}학년 <span class="badge${o2.overCs ? ' bad' : ''}">반 수업 ${o2.des}시간${G.cs != null ? ` / 학급별 수업 칸 ${G.cs}교시` : ''}</span>${o2.sec ? `<span class="badge">분반 ${o2.sec}시간</span>` : ''}<span class="grow"></span><span class="small muted">${G.g}학년 계 <b>${o2.total}</b>시간</span></h4>`;
+      if (des.length) {
+        const nC = G.classes;
+        const trs = des.map(row => {
+          const cur = pickDesH.bind(null, P, row.sid);
+          const cnt = new Map(); for (const c of row.cells) { const h = cur(c.c, row.cr); if (h) cnt.set(h, (cnt.get(h) || 0) + 1); }
+          const rh = rowH[`${sem}|${row.sid}`] || (cnt.size ? [...cnt.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0][0] : row.cr);
+          const cells = range(nC).map(i => {
+            const c = i + 1; const cell = row.cells.find(x => x.c === c);
+            if (!cell) return '<td class="c muted">—</td>';
+            const h = cur(c, row.cr);
+            const man = cell.others.filter(x => !x.a); const over = h > 0 && sum(man, x => x.h) + h > row.cr;
+            const oth = cell.others.map(x => `${esc(x.name)} ${x.h}h${x.a ? '<span class="auto-dot" title="자동 배정(추천)"></span>' : ''}`).join(', ');
+            return `<td class="c mx-td${h ? ' on' : ''}${over ? ' over' : ''}"><label class="mx-cell"><input type="checkbox" class="mx-ck" data-sid="${esc(row.sid)}" data-c="${c}"${h ? ' checked' : ''} aria-label="${G.g}학년 ${c}반 ${esc(row.name)}">${row.cr > 1 ? `<select class="inp mx-h" data-sid="${esc(row.sid)}" data-c="${c}"${h ? '' : ' disabled'} aria-label="${c}반 시간">${range(row.cr).map(k => `<option value="${k + 1}"${(h || rh) === k + 1 ? ' selected' : ''}>${k + 1}h</option>`).join('')}</select>` : `<span class="xsmall">${row.cr}h</span>`}${cell.a && h === cell.h ? '<span class="auto-dot" title="자동 배정(추천) 칸 — 바꾸면 직접 정한 칸이 됩니다"></span>' : ''}</label>${oth ? `<div class="mx-other">${oth}</div>` : ''}${cell.left && !h ? `<div class="mx-other">미배정 ${cell.left}h</div>` : ''}</td>`;
+          }).join('');
+          return `<tr${row.free ? ' class="mx-free"' : ''}><td><b>${esc(row.name)}</b>${fitTxt(row.fit)}<div class="xsmall muted">${esc(deptPath(S, row.dept))} · ${row.cr}학점 · ${row.cells.length}개 반${row.free ? ' · 전공 교사 없음' : ''}</div></td>${cells}
+            <td class="nowrap"><div class="mx-quick">${row.cr > 1 ? `<select class="inp mx-rowh" data-sid="${esc(row.sid)}" aria-label="모든 반 시간">${range(row.cr).map(k => `<option value="${k + 1}"${rh === k + 1 ? ' selected' : ''}>${k + 1}h씩</option>`).join('')}</select>` : ''}<button class="btn xs" data-mx="all" data-sid="${esc(row.sid)}" title="이 과목의 모든 반을 체크(통반)">전 반</button><button class="btn xs" data-mx="none" data-sid="${esc(row.sid)}">해제</button></div></td></tr>`;
+        }).join('');
+        html += `<div class="tbl-wrap"><table class="tbl compact mx-tbl"><thead><tr><th>지정 과목</th>${range(nC).map(i => `<th>${i + 1}반</th>`).join('')}<th>모든 반</th></tr></thead><tbody>${trs}</tbody></table></div>`;
+      }
+      if (secs.length) {
+        const trs = secs.map(row => {
+          const cells = row.cells.map(cell => {
+            const on = !!P.sec[cell.key];
+            return `<label class="mx-cell mx-sec${on ? ' on' : ''}"><input type="checkbox" class="mx-sk" data-key="${esc(cell.key)}"${on ? ' checked' : ''} aria-label="${esc(row.name)} ${cell.n}분반">${cell.n}분반 <span class="chip bk${(cell.b ?? 0) % 8}" title="${cell.b != null ? `${BL[cell.b]}블록` : '블록 미정'}">${cell.b != null ? BL[cell.b] : '?'}</span>${cell.a && on ? '<span class="auto-dot" title="자동 배정(추천) 칸"></span>' : ''}${cell.other ? `<span class="mx-other">${esc(cell.other.name)}${cell.other.a ? '<span class="auto-dot" title="자동 배정(추천)"></span>' : ''}</span>` : ''}</label>`;
+          }).join('');
+          return `<tr${row.free ? ' class="mx-free"' : ''}><td><b>${esc(row.name)}</b>${fitTxt(row.fit)}<div class="xsmall muted">${esc(row.gname)}(택${row.pick}) · ${row.cr}학점 · ${row.cells.length}분반${row.free ? ' · 전공 교사 없음' : ''}</div></td><td><div class="mx-secs">${cells}</div></td>
+            <td class="nowrap"><div class="mx-quick"><button class="btn xs" data-mx="sall" data-sid="${esc(row.sid)}">모든 분반</button><button class="btn xs" data-mx="snone" data-sid="${esc(row.sid)}">해제</button></div></td></tr>`;
+        }).join('');
+        html += `<div class="tbl-wrap"><table class="tbl compact mx-tbl"><thead><tr><th>선택 과목</th><th>분반 <span class="muted xsmall">(글자 = 블록. 같은 블록의 분반 2개는 같은 시간에 겹침)</span></th><th></th></tr></thead><tbody>${trs}</tbody></table></div>`;
+      }
+      return html + '</div>';
+    }).join('');
+    return sumHtml + grades;
+  };
+  openModal(`<h3>${esc(t.name)} 담당 수업 체크표 <span class="badge">${esc(teacherDeptName(S, t))}</span></h3>
+    <p class="small">학년별로 맡을 <b>반(시간)</b>과 <b>분반</b>을 체크하세요. 한 반의 과목을 두 교사가 나누어 맡으면(예: 전 반 1시간씩 통반) 시간을 학점보다 적게 고르고, 나머지 시간은 다른 교사의 체크표에서 정합니다. 전공 교사가 없는 <b>교양 과목</b>은 학년마다 아래쪽 '교양 배분' 줄에 있어 어느 교과 교사든 체크할 수 있습니다. 저장하면 반별 담당·시간 나누기·분반 담당에 들어가 시간표 배치와 시수에 바로 반영됩니다(직접 정한 칸).</p>
+    <div id="mxBody">${body()}</div>
+    <div class="foot"><span class="small muted grow" id="mxHint"></span><button class="btn" data-act="m-cancel">취소</button><button class="btn" data-mx="save" data-tt="0">저장</button><button class="btn primary" data-mx="save" data-tt="1" title="저장한 뒤 두 학기 기초 시간표를 다시 계산해 겹침을 확인합니다">저장하고 시간표 계산</button></div>`, m => {
+    m.classList.add('wide');
+    const bodyEl = m.querySelector('#mxBody');
+    const redraw = () => { const y = m.closest('.modal-bg').scrollTop; bodyEl.innerHTML = body(); m.closest('.modal-bg').scrollTop = y; hint(); };
+    const hint = () => { const bad = [1, 2].reduce((a, s) => a + (teacherMatrixCheck(S, s, tid, D[s], M[s]) || { hard: 0 }).hard, 0); const h = m.querySelector('#mxHint'); h.textContent = bad ? `겹침이 생기는 체크 ${bad}건이 있습니다(저장은 됩니다).` : ''; };
+    const setDes = (s, sid, c, h) => { const P = D[s]; if (h > 0) (P.des[sid] = P.des[sid] || {})[c] = h; else if (P.des[sid]) { delete P.des[sid][c]; if (!Object.keys(P.des[sid]).length) delete P.des[sid]; } };
+    const rowOf = sid => M[sem].grades.flatMap(G => G.rows).find(r => r.sid === sid);
+    const rhOf = sid => { const sel = m.querySelector(`select.mx-rowh[data-sid="${CSS.escape(sid)}"]`); const r = rowOf(sid); return sel ? +sel.value || r.cr : (r ? r.cr : 1); };
+    bodyEl.addEventListener('change', ev => {
+      const el = ev.target;
+      if (el.classList.contains('mx-ck')) { const sid = el.getAttribute('data-sid'), c = +el.getAttribute('data-c'); const sel = el.parentElement.querySelector('select.mx-h'); setDes(sem, sid, c, el.checked ? (sel ? +sel.value || 1 : rowOf(sid).cr) : 0); redraw(); }
+      else if (el.classList.contains('mx-h')) { const sid = el.getAttribute('data-sid'), c = +el.getAttribute('data-c'); if (pickDesH(D[sem], sid, c, 99) > 0) { setDes(sem, sid, c, +el.value || 1); redraw(); } }
+      else if (el.classList.contains('mx-rowh')) { const sid = el.getAttribute('data-sid'); rowH[`${sem}|${sid}`] = +el.value || 1; const r = rowOf(sid); for (const cell of r.cells) if (pickDesH(D[sem], sid, cell.c, r.cr) > 0) setDes(sem, sid, cell.c, +el.value || 1); redraw(); }
+      else if (el.classList.contains('mx-sk')) { const key = el.getAttribute('data-key'); if (el.checked) D[sem].sec[key] = 1; else delete D[sem].sec[key]; redraw(); }
+    });
+    m.addEventListener('click', ev => {
+      const b = ev.target.closest('[data-mx]'); if (!b) return;
+      ev.preventDefault();
+      const k = b.getAttribute('data-mx'), sid = b.getAttribute('data-sid');
+      if (k === 'sem') { sem = +b.getAttribute('data-v'); redraw(); return; }
+      if (k === 'all' || k === 'none') { const r = rowOf(sid); const h = k === 'all' ? rhOf(sid) : 0; if (r) for (const cell of r.cells) setDes(sem, sid, cell.c, h); redraw(); return; }
+      if (k === 'sall' || k === 'snone') { const r = rowOf(sid); if (r) for (const cell of r.cells) { if (k === 'sall') D[sem].sec[cell.key] = 1; else delete D[sem].sec[cell.key]; } redraw(); return; }
+      if (k === 'save') {
+        const withTT = b.getAttribute('data-tt') === '1';
+        const res = [];
+        closeModal();
+        commit(S2 => { for (const s of [1, 2]) { const r = applyTeacherMatrix(S2, s, tid, D[s]); if (r) res.push(r); } });
+        const n = sum(res, r => r.set + r.cleared), trims = res.flatMap(r => r.trimmed.filter(x => !x.a)), taken = res.flatMap(r => r.taken.filter(x => !x.a));
+        const extra = [];
+        if (trims.length) extra.push(`다른 교사 몫 조정 ${trims.length}칸(${trims.slice(0, 3).map(x => `${x.g}학년 ${x.c}반 ${x.name} ${x.tname} ${x.from}→${x.to}h`).join(', ')}${trims.length > 3 ? ' …' : ''})`);
+        if (taken.length) extra.push(`다른 교사의 분반을 넘겨받음 ${taken.length}개`);
+        if (!n) { toast('바뀐 칸이 없습니다.'); return; }
+        if (withTT) startMatrixTT(t.name, n, extra);
+        else toast(`${t.name} 담당 수업 ${n}칸을 저장했습니다${extra.length ? ` · ${extra.join(' · ')}` : ''}. 시간표는 [${navTitle('tt')}]을 열면 다시 계산됩니다.`);
+      }
+    });
+    m.querySelector('[data-act="m-cancel"]').onclick = () => closeModal();
+    hint();
+  });
+}
+ACTIONS['teach-matrix'] = el => { const { sem } = teachSel(); openTeacherMatrixModal(el.getAttribute('data-id'), sem); };
+/* 체크표 저장 뒤 두 학기 기초 시간표 다시 계산(자동 배정 칸은 겹칠 때만 바꿈) */
+async function startMatrixTT(name, n, extra = []) {
+  if (App.busy) return;
+  App.busy = true; App.busyMsg = `${name} 담당 수업을 저장하고 두 학기 시간표를 다시 계산하고 있습니다…`; render();
+  const out = [];
+  try {
+    await nextFrame();
+    const S = App.S;
+    const sems = [1, 2].filter(sem => buildTTModel(S, sem).grades.length);
+    for (let i = 0; i < sems.length; i++) {
+      const sem = sems[i];
+      await ttRun(S, sem, { ...ttAutoOpts(S, sem), onProg: p => { const el = $('#ttProg > div'); if (el) el.style.width = Math.round((i + p) / sems.length * 100) + '%'; } });
+      const { M, st } = ttCurrent(S, sem);
+      if (st) { const ev = ttEvaluate(M, st); const v = ttVerdict(M, st, ev); storeVerdict(S, sem, v.level); out.push(`${sem}학기 ${v.level === 'good' ? '운영 가능' : v.level === 'warn' ? '조정 필요' : '운영 곤란'}${ev.tconf.length ? `(교사 겹침 ${ev.tconf.length}곳)` : '(겹침 없음)'}`); }
+    }
+    saveStateNow(S);
+    toast(`${name} 담당 수업 ${n}칸 저장${extra.length ? ` · ${extra.join(' · ')}` : ''} · ${out.join(', ')}`, out.some(x => x.includes('곤란')) ? 'bad' : '');
+  } catch (e) { console.error(e); toast('시간표 계산 중 오류: ' + e.message, 'bad'); }
+  App.busy = false; App.busyMsg = ''; render();
+}
 /* 수업 불가 시간 */
 ACTIONS['teach-off'] = el => {
   const S = App.S; const t = teacherMap(S).get(el.getAttribute('data-id')); if (!t) return;
@@ -6447,9 +6816,7 @@ function xlTeacherSheets(wb, S) {
       const fam = new Set(familyDeptIds(S, d.id));
       for (const t of (S.teachers || []).filter(x => fam.has(x.dept))) {
         const x = L.loads.get(t.id);
-        const items = new Map();
-        for (const i of x.items) { const k = i.kind === 'des' ? `${i.g}학년 ${i.name}` : `${i.g}학년 ${i.name}`; if (!items.has(k)) items.set(k, []); items.get(k).push(i.kind === 'des' ? `${i.c}반${i.h !== i.full ? `(${i.h}h)` : ''}` : `${i.n}분반`); }
-        XL.row(sh, r++, 0, [d.name, t.name, deptOf(S, t.dept).name, x.byG[1] || '', x.byG[2] || '', x.byG[3] || '', x.total, x.total - std, [...items.entries()].map(([k, v]) => `${k} ${v.join('·')}`).join(' / ')], 'ctr');
+        XL.row(sh, r++, 0, [d.name, t.name, deptOf(S, t.dept).name, x.byG[1] || '', x.byG[2] || '', x.byG[3] || '', x.total, x.total - std, teacherItemsText(S, sem, x, { sep: ' / ' })], 'ctr');
       }
     }
     const un = L.unassigned;
