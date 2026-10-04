@@ -538,6 +538,8 @@ table.stt-t td.blk small { display: block; color: var(--muted); font-size: 10.5p
 .cm-row { display: flex; align-items: flex-start; line-height: 1.55; }
 .cm-row input { margin-top: 3px; flex: 0 0 auto; }
 .t-warn { color: var(--warn); font-size: 12.5px; }
+.t-bad { color: var(--bad); font-size: 12.5px; font-weight: 600; }
+.xsmall.t-warn, .xsmall.t-bad { font-size: 11.5px; }
 @media print { table.stt-t td.blk { background: #fff; } table.stt-t td.blk small { color: #999; } }
 
 /* ---------- 교사별 수업 배정 ---------- */
@@ -652,6 +654,14 @@ table.tt.dg-av td small { overflow-wrap: anywhere; word-break: keep-all; }
 .good-ink { color: var(--good); font-weight: 700; }
 .warn-ink { color: var(--warn); font-weight: 700; }
 tr.mx-free > td:first-child { border-left: 3px solid var(--info); }
+/* 확정 전 점검 */
+.confirm-card h3 { flex-wrap: wrap; }
+.confirm-tbl td { vertical-align: top; }
+.confirm-tbl .ck-ic .badge { min-width: 22px; justify-content: center; font-weight: 700; }
+.confirm-tbl tr.ck-warn td:nth-child(3), .confirm-tbl tr.ck-bad td:nth-child(3) { color: var(--ink); }
+.confirm-tbl tr.ck-info td:nth-child(3) { color: var(--muted); }
+.free-mode .seg { flex: 0 0 auto; }
+@media print { .confirm-card .badge { border-color: #bbb; } }
 
 </style>
 </head>
@@ -809,6 +819,29 @@ function parseClassSpec(spec, n) {
   }
   return [...out].filter(x => x >= 1 && x <= n).sort((a, b) => a - b);
 }
+/* 대상 반 입력 점검: 비움(전체)과 해석 실패를 구분
+   {targets, blank, bad:[읽지 못한 글자], out:[학급 수를 넘는 반 번호]} — 입력이 있는데 대상이 0반이면 오류 */
+function classSpecCheck(spec, n) {
+  const raw = String(spec ?? '').trim();
+  const targets = parseClassSpec(raw, n);
+  if (!raw || /^(전체|all)$/i.test(raw.replace(/반/g, '').trim())) return { targets, blank: true, bad: [], out: [] };
+  if (HALF_FRONT.test(raw) || HALF_BACK.test(raw) || /홀수|짝수/.test(raw)) return { targets, blank: false, bad: [], out: [] };
+  const s = raw.replace(/반/g, '').replace(/[–—~∼〜]/g, '-').replace(/\s*-\s*/g, '-');
+  const bad = [], out = [];
+  for (const tok of s.split(/[,\s/]+/)) {
+    if (!tok) continue;
+    const m = tok.match(/^(\d+)-(\d+)$/);
+    if (m) { let a = +m[1], b = +m[2]; if (a > b) [a, b] = [b, a]; for (let i = a; i <= b; i++) if (i < 1 || i > n) out.push(i); }
+    else if (/^\d+$/.test(tok)) { if (+tok < 1 || +tok > n) out.push(+tok); }
+    else if (!/^(전체|all)$/i.test(tok)) bad.push(tok);
+  }
+  return { targets, blank: false, bad, out: [...new Set(out)].sort((a, b) => a - b) };
+}
+/* 화면 이름(계산 모듈에서도 쓸 수 있게: 화면 모듈이 없으면 기본 이름) */
+const NAV_FALLBACK = { settings: '기본 설정', depts: '교과·교원', cohort: '입학년도별 편성', curr: '편제·수강신청', sections: '개설 학급·확대학급', hours: '시수·교원 부담', teach: '교사별 수업 배정', blocks: '블록 편성', tt: '시간표·운영 판정', dguide: '교과별 설계 안내', roster: '학생 명단(선택)' };
+const navT = id => (typeof navTitle === 'function' ? navTitle(id) : NAV_FALLBACK[id] || id);
+/* 학점(시수)이 정수인지: 소수 학점은 요일·교시 배치에 놓을 수 없음 */
+const crInt = v => Number.isInteger(+v);
 function classSpecText(list, n) {
   if (!list.length) return '없음';
   if (list.length === n) return '전체';
@@ -1195,6 +1228,8 @@ function exampleState() {
     const cm = parseClassMap(F.classmap.wb, S.roster[g], g, { nClass: S.grades[g - 1].classes });
     if (cm) applyClassMap(S, g, cm, F.classmap.name);
   }
+  // 블록 좌석: 택N 블록마다 학생 전원이 앉도록 모자란 분반을 늘림(⑤ '분반 추가' 제안과 같은 방법 — 예: 3학년 2학기 심화 영어 독해와 작문 4→5반)
+  for (const k of TERM_KEYS) for (const G of S.terms[k].groups) applySeatFix(S, +k[0], G);
   S.meta.example = true;
   return S;
 }
@@ -1252,7 +1287,7 @@ function emptyState() {
     v: 2,   // 2: 진로상담 교과 추가(2026-10-02)
     school: { name: '', year: new Date().getFullYear() + 1 },
     grades: [1, 2, 3].map(g => ({ g, classes: 0, students: 0, ca: 3, caSlots: [], off: [] })),
-    rules: { cap: 29, tol: 0, small: 10, std: 18, tmax: 6, split: 2 },
+    rules: { cap: 29, tol: 0, small: 10, std: 18, tmax: 6, split: 2, freeMode: 'grade' },
     week: { days: ['월', '화', '수', '목', '금'], periods: [7, 7, 7, 7, 7] },
     rooms: { extra: 0, special: defaultSpecialRooms() },
     depts: defaultDepts(),
@@ -1293,10 +1328,11 @@ function migrate(S0) {
   const int = (v, d, lo, hi) => clamp(Math.round(toNum(v, d)), lo, hi);
   S.school = Object.assign({ name: '', year: new Date().getFullYear() + 1 }, obj(S.school));
   S.school.name = String(S.school.name ?? '');
-  S.rules = Object.assign({ cap: 29, tol: 0, small: 10, std: 18, tmax: 6, split: 2 }, obj(S.rules));
+  S.rules = Object.assign({ cap: 29, tol: 0, small: 10, std: 18, tmax: 6, split: 2, freeMode: 'grade' }, obj(S.rules));
   S.rules.cap = int(S.rules.cap, 29, 1, 200); S.rules.tol = int(S.rules.tol, 0, 0, 100); S.rules.small = int(S.rules.small, 10, 0, 500); S.rules.std = clamp(toNum(S.rules.std, 18), 1, 60);
   S.rules.tmax = int(S.rules.tmax, 6, 0, 12);
   S.rules.split = [0, 1, 2].includes(+S.rules.split) ? +S.rules.split : 2;   // 시수 맞춤 나누기: 0 끔 · 1 1시간까지 · 2 2시간씩
+  S.rules.freeMode = S.rules.freeMode === 'class' ? 'class' : 'grade';          // 남는 교시: 학년 전체가 같은 시간(하교) · 반마다 다른 시간(자습)
   S.week = Object.assign({ days: ['월', '화', '수', '목', '금'], periods: [7, 7, 7, 7, 7] }, obj(S.week));
   S.week.days = arr(S.week.days).map(String).slice(0, 6);
   if (!S.week.days.length) S.week.days = ['월', '화', '수', '목', '금'];
@@ -1345,7 +1381,7 @@ function migrate(S0) {
   }
   S.v = 2;
   const blocks = obj(S.blocks); S.blocks = {};
-  for (const [id, rec] of Object.entries(blocks)) if (rec && typeof rec === 'object') S.blocks[id] = { assign: obj(rec.assign), locks: obj(rec.locks), ...(rec.tsig ? { tsig: String(rec.tsig) } : {}) };
+  for (const [id, rec] of Object.entries(blocks)) if (rec && typeof rec === 'object') S.blocks[id] = { assign: obj(rec.assign), locks: obj(rec.locks), ...(rec.tsig ? { tsig: String(rec.tsig) } : {}), ...(rec.rsig ? { rsig: String(rec.rsig) } : {}) };
   const tt = obj(S.tt); S.tt = {};
   for (const k of ['1', '2']) if (tt[k] && typeof tt[k] === 'object') S.tt[k] = tt[k];
   const roster = obj(S.roster); S.roster = {};
@@ -1432,7 +1468,20 @@ function saveStateNow(S) {
 const gradeOf = (S, g) => S.grades.find(x => x.g === g);
 const termKey = (g, s) => `${g}-${s}`;
 function termLabel(key) { const [g, s] = String(key).split('-'); return `${g}학년 ${s}학기`; }
-const capOf = S => Math.max(1, (+S.rules.cap || 0) + (+S.rules.tol || 0));
+const capOf = S => Math.max(1, (+S.rules.cap || 0) + (+S.rules.tol || 0));   // 유효 정원: 개설·블록 편성·분반 배정·초과 경고에 모두 이 값(기준 + 허용 초과)
+/* 교원 수(한 기준): 교과·교원에 적은 수와 교사 명단 수 중 큰 값 — 시수표·블록 편성·시간표가 모두 이 값을 씀 */
+function namedTeacherCount(S, deptId) { let n = 0; for (const t of S.teachers || []) if (t && t.dept === deptId) n++; return n; }
+function deptTeacherCount(S, d) { return Math.max(0, +d.t || 0, namedTeacherCount(S, d.id)); }
+/* 교원 수보다 교사 명단이 많은 교과(교원 수를 줄였는데 담당 수업이 있는 교사 칸이 남은 경우) */
+function teacherCountIssues(S) {
+  return S.depts.map(d => ({ d, t: Math.max(0, +d.t || 0), named: namedTeacherCount(S, d.id) })).filter(x => x.named > x.t);
+}
+/* 블록 좌석: 택N 선택군은 N개 블록이고 학생은 블록마다 한 과목씩 들으므로, 블록마다 대상 학생 전원이 앉을 분반이 있어야 함
+   → 블록당 최소 분반 q = ⌈학생 ÷ 유효 정원⌉, 선택군 전체 최소 N × q반 */
+function groupSeatNeed(students, pick, cap) {
+  const q = students > 0 ? Math.ceil(students / Math.max(1, cap) - 1e-9) : 0;
+  return { q, need: q * pick };
+}
 const deptOf = (S, id) => S.depts.find(d => d.id === id) || null;
 function deptName(S, id) { const d = deptOf(S, id); return d ? d.name : '미지정'; }
 function deptPath(S, id) {
@@ -1470,7 +1519,8 @@ function calcGroup(S, g, G) {
     if (app > 0 && sec === 0) flags.push({ k: 'bad', t: '미개설' });
     if (avg != null && avg > cap + 1e-9) flags.push({ k: 'warn', t: '정원 초과' });
     if (app > 0 && app <= (+S.rules.small || 0)) flags.push({ k: 'info', t: '소인수' });
-    if ((+sj.cr || 0) !== (+G.cr || 0)) flags.push({ k: 'warn', t: '학점 상이' });
+    if (!crInt(sj.cr)) flags.push({ k: 'bad', t: `소수 학점(${sj.cr})` });
+    else if ((+sj.cr || 0) !== (+G.cr || 0)) flags.push({ k: 'bad', t: `학점 ${+sj.cr || 0} ≠ 블록 ${+G.cr || 0}시간` });
     if (manual && sec !== auto) flags.push({ k: 'acc', t: `조정(${auto}→${sec})` });
     if (!deptOf(S, sj.dept)) flags.push({ k: 'warn', t: '교과 미지정' });
     return { sj, app, est, auto, sec, manual, avg, blockMax: sec > 0 ? Math.ceil(sec / pick) : 0, flags };
@@ -1480,8 +1530,11 @@ function calcGroup(S, g, G) {
   const base = K > 0 ? classes * pick : 0;   // 개설 반이 없으면 기준도 0
   const sumApp = sum(rows, r => r.app);
   const expApp = students * pick;
+  // 블록 좌석(개설 반이 있을 때): 블록마다 학생 전원이 앉을 분반이 필요
+  const seat = K > 0 ? groupSeatNeed(students, pick, cap) : { q: 0, need: 0 };
+  seat.short = Math.max(0, seat.need - K);
   return {
-    G, g, pick, students, rows, K, base, delta: K - base, classes,
+    G, g, pick, students, rows, K, base, delta: K - base, classes, cap, seat,
     sumApp, expApp, diffApp: sumApp - expApp, cr: +G.cr || 0,
     perBlock: K / pick, maxPerBlock: Math.ceil(K / pick), extraRooms: Math.max(0, Math.ceil(K / pick) - classes),
     addHours: (K - base) * (+G.cr || 0), avgSize: K ? sumApp / K : null,
@@ -1525,9 +1578,8 @@ function deptModel(S) {
   const list = S.depts; const idx = new Map(list.map((d, i) => [d.id, i]));
   const par = list.map(d => (d.parent && idx.has(d.parent)) ? idx.get(d.parent) : -1);
   const kids = list.map(() => []); par.forEach((p, i) => { if (p >= 0) kids[p].push(i); });
-  // 교원 수: 교과·교원에 적은 수, 교사 명단이 더 많으면 명단 수
-  const named = new Map(); for (const t of S.teachers || []) if (t && t.dept) named.set(t.dept, (named.get(t.dept) || 0) + 1);
-  const T = list.map(d => Math.max(0, +d.t || 0, named.get(d.id) || 0));
+  // 교원 수: 교과·교원에 적은 수, 교사 명단이 더 많으면 명단 수(시수표 calcHours와 같은 기준 deptTeacherCount)
+  const T = list.map(d => deptTeacherCount(S, d));
   const free = list.map((d, i) => !!d.free || (par[i] >= 0 && !!list[par[i]].free));
   const tops = list.map((_, i) => i).filter(i => par[i] < 0 && !free[i]);
   return { list, idx, par, kids, T, free, tops, n: list.length };
@@ -1602,7 +1654,7 @@ function calcHours(S, sem) {
     for (const gc of tc.groups) for (const r of gc.rows) if (r.sec > 0) rows.push({ dept: r.sj.dept, g: gr.g, name: r.sj.name, kind: gc.G.name, sec: r.sec, cr: +r.sj.cr || 0, hours: r.sec * (+r.sj.cr || 0), ref: r.sj.id, group: gc.G.id });
   }
   const stats = {};
-  for (const d of S.depts) stats[d.id] = { rows: [], own: 0, t: Math.max(0, +d.t || 0) };
+  for (const d of S.depts) stats[d.id] = { rows: [], own: 0, t: deptTeacherCount(S, d) };
   const none = [];
   for (const r of rows) { if (stats[r.dept]) { stats[r.dept].rows.push(r); stats[r.dept].own += r.hours; } else none.push(r); }
   for (const d of S.depts) {
@@ -1610,7 +1662,7 @@ function calcHours(S, sem) {
     const kids = S.depts.filter(x => x.parent === d.id);
     st.kids = kids.map(k => k.id);
     st.all = st.own + sum(kids, k => stats[k.id].own);
-    st.tAll = st.t + sum(kids, k => Math.max(0, +k.t || 0));
+    st.tAll = st.t + sum(kids, k => deptTeacherCount(S, k));
     st.avg = st.tAll > 0 ? st.all / st.tAll : null;
   }
   return { sem, rows, stats, none, total: sum(rows, r => r.hours) };
@@ -1624,7 +1676,7 @@ function distributeShared(S, H) {
     if (!st.kids.length) continue;
     const members = [];
     if (st.t > 0) members.push({ id: P.id, name: P.name + '(공통)', t: st.t, base: 0 });
-    for (const k of st.kids) { const d = deptOf(S, k); const t = Math.max(0, +d.t || 0); if (t > 0) members.push({ id: k, name: d.name, t, base: H.stats[k].own }); }
+    for (const k of st.kids) { const d = deptOf(S, k); const t = deptTeacherCount(S, d); if (t > 0) members.push({ id: k, name: d.name, t, base: H.stats[k].own }); }
     const chunks = [];
     for (const r of st.rows) for (let i = 0; i < r.sec; i++) chunks.push({ name: r.name, cr: r.cr });
     chunks.sort((a, b) => b.cr - a.cr);
@@ -1674,7 +1726,7 @@ function hoursSummary(S) {
    - 각 과목의 개설 반(분반)을 블록에 배치: 과목 분산, 교과 교사 동시 수요,
      교실 수, 블록별 학생 수(수용), 같은 블록 충돌(동시 선택)을 함께 고려.
    ========================================================== */
-const BW = { spread: 300, teacher: 1000, smooth: 12, room: 500, special: 1000, bal: 30, load: 25, cap: 200, conf: 30, stu: 150 };
+const BW = { spread: 300, teacher: 1000, smooth: 12, room: 500, special: 1000, bal: 30, load: 25, cap: 200, seat: 2500, conf: 30, stu: 150 };
 
 function popc(m) { let c = 0; while (m) { m &= m - 1; c++; } return c; }
 function hasSDR(list, masks) {
@@ -1690,7 +1742,9 @@ function hasSDR(list, masks) {
   return dfs(0, 0);
 }
 
-/* 학생 명단 → 선택군 과목 인덱스 */
+/* 학생 명단 → 선택군 과목 인덱스
+   대상 학생: 선택군 대상 학생 수를 따로 정하지 않았으면(G.students 비움) 학년 명단 전원 — 이 선택군에서 한 과목도 고르지 않은 학생은 '미신청(0과목)'으로 알림.
+   대상 학생 수를 정한 선택군(일부 학생만 듣는 묶음)은 이 선택군 과목을 고른 학생만 대상 */
 function rosterForGroup(S, g, G, subjList) {
   const R = S.roster && S.roster[g];
   if (!R || !R.students || !R.students.length) return null;
@@ -1699,9 +1753,12 @@ function rosterForGroup(S, g, G, subjList) {
   const students = []; const wrongCount = []; const unopened = [];
   const M = subjList.length;
   const co = range(M).map(() => new Float64Array(M));
+  const allTarget = G.students == null || G.students === '';
+  let targets = 0;
   for (const st of R.students) {
     const picked = (st.picks || []).filter(p => allNames.has(p));
-    if (!picked.length) continue;
+    if (!picked.length) { if (allTarget) { targets++; wrongCount.push({ id: st.id, name: st.name, n: 0 }); } continue; }
+    targets++;
     const idx = [];
     const closed = [];
     for (const p of picked) { if (nameIdx.has(p)) idx.push(nameIdx.get(p)); else closed.push(allNames.get(p).name); }
@@ -1710,7 +1767,7 @@ function rosterForGroup(S, g, G, subjList) {
     for (let a = 0; a < idx.length; a++) for (let b = a + 1; b < idx.length; b++) { co[idx[a]][idx[b]]++; co[idx[b]][idx[a]]++; }
     students.push({ id: st.id, name: st.name, subj: idx, ok: idx.length >= 2 && idx.length <= (G.pick | 0) });
   }
-  return { students, wrongCount, unopened, co, total: students.length };
+  return { students, wrongCount, unopened, co, total: students.length, targets, allTarget };
 }
 
 function blockContext(S, g, s, G) {
@@ -1727,8 +1784,9 @@ function blockContext(S, g, s, G) {
   const gr = gradeOf(S, g);
   const genCap = (+gr.classes || 0) + (+S.rooms.extra || 0);
   const Sg = gc.students || 0;
-  const cap = Math.max(1, +S.rules.cap || 29);
+  const cap = capOf(S), capStd = Math.max(1, +S.rules.cap || 29);   // 유효 정원(기준 + 허용 초과) · 기준 인원
   const ros = rosterForGroup(S, g, G, subj);
+  const nStu = ros ? ros.targets : Sg;                                // 블록마다 앉아야 할 학생 수(명단이 있으면 명단 기준)
   const pairs = [];
   for (let i = 0; i < M; i++) for (let j = i + 1; j < M; j++) {
     const w = ros ? ros.co[i][j] : (Sg > 0 ? subj[i].app * subj[j].app / Sg : 0);
@@ -1745,7 +1803,7 @@ function blockContext(S, g, s, G) {
     const td = id ? DM.idx.get(tmap.get(id).dept) : undefined;
     sc.dept = id && td != null ? (DM.free[td] ? -1 : td) : subj[sc.si].dept;
   }
-  return { S, g, s, G, gc, N, DM, RM, subj, M, secs, genCap, Sg, cap, ros, pairs, capAgg, nT: tIdx.size, tIds: [...tIdx.keys()] };
+  return { S, g, s, G, gc, N, DM, RM, subj, M, secs, genCap, Sg, nStu, cap, capStd, ros, pairs, capAgg, nT: tIdx.size, tIds: [...tIdx.keys()] };
 }
 
 function newBlockState(ctx) {
@@ -1796,8 +1854,10 @@ function blockCost(ctx, st) {
     if (Sg > 0) {
       let L = 0; for (let i = 0; i < M; i++) L += subj[i].app * st.cnt[i * N + b] / subj[i].sec;
       const dv = (L - Sg) / Sg * 10; c += BW.load * dv * dv;
-      const capB = st.nb[b] * cap; if (capB < Sg) c += BW.cap * (Sg - capB) / cap;
     }
+    // 블록 좌석: 학생 전원이 이 블록에서 한 과목씩 들으므로 분반 수 × 유효 정원 ≥ 학생 수(모자란 분반 수만큼 큰 비용)
+    const nS = ctx.nStu || Sg;
+    if (nS > 0) { const capB = st.nb[b] * cap; if (capB < nS) c += BW.seat * Math.ceil((nS - capB) / cap); }
   }
   const sb = ctx._sb || (ctx._sb = new Int16Array(M));
   for (let i = 0; i < M; i++) { let only = -1, k = 0; for (let b = 0; b < N; b++) if (st.cnt[i * N + b] > 0) { only = b; k++; } sb[i] = k === 1 ? only : -1; }
@@ -1895,6 +1955,12 @@ function designBlocks(S, g, s, G, opts = {}) {
   return { assign, locks: keepLocks, cost: best.cost };
 }
 
+/* 이 선택군에 대한 학생 신청 요약(명단이 바뀌었는지 확인용, 명단이 없으면 '') */
+function groupRosterSig(S, g, G) {
+  const R = S.roster && S.roster[g]; if (!R || !R.students || !R.students.length) return '';
+  const names = new Set(G.subjects.map(x => normName(x.name)));
+  return hashStr(JSON.stringify(R.students.map(x => x.id + ':' + (x.picks || []).filter(p => names.has(p)).sort().join(','))));
+}
 /* 선택군 블록 배치가 유효한지 확인하고, 없거나 어긋나면 보정 */
 function ensureBlocks(S, g, s, G) {
   const ctx = blockContext(S, g, s, G);
@@ -1910,7 +1976,7 @@ function ensureBlocks(S, g, s, G) {
       const st = newBlockState(ctx); ctx.secs.forEach((sc, i) => bMove(ctx, st, i, rec.assign[sc.key]));
       if (teacherClashCount(ctx, st) > 0) {
         const res = designBlocks(S, g, s, G, { mode: 'tfix' });
-        S.blocks[G.id] = { assign: res.assign, locks: res.locks || {}, tsig };
+        S.blocks[G.id] = { assign: res.assign, locks: res.locks || {}, tsig, ...(rec.rsig ? { rsig: rec.rsig } : {}) };
         return true;
       }
     }
@@ -1919,7 +1985,8 @@ function ensureBlocks(S, g, s, G) {
   }
   // 반 구성이 바뀌었으면 고정(🔒)한 반은 그대로 두고 나머지를 다시 최적화
   const res = designBlocks(S, g, s, G, { mode: 'auto', fast: true });
-  S.blocks[G.id] = { assign: res.assign, locks: res.locks || {}, tsig };
+  S.blocks[G.id] = { assign: res.assign, locks: res.locks || {}, tsig, rsig: groupRosterSig(S, g, G) };
+  if (typeof repairBlockCapacity === 'function') repairBlockCapacity(S, g, s, G, { maxEval: 150 });   // 명단이 있으면 실제 분반 배정으로 정원 초과를 줄임
   return true;
 }
 function ensureAllBlocks(S) {
@@ -1968,7 +2035,8 @@ function evalBlocks(S, g, s, G) {
     const special = [];
     for (let r = 1; r < RM.R; r++) { const x = st.need[b * RM.R + r]; if (x > 0) special.push({ r, name: RM.types[r].name, need: x, cap: RM.cnt[r], over: x > RM.cnt[r] }); }
     let L = 0; for (let i = 0; i < M; i++) L += ctx.subj[i].app * st.cnt[i * N + b] / ctx.subj[i].sec;
-    return { b, secs, n: st.nb[b], gen: st.need[b * RM.R], special, dem, load: L, capSum: st.nb[b] * ctx.cap, tclash, over: dem.some(x => x.over) || special.some(x => x.over) || tclash.length > 0 };
+    const capSum = st.nb[b] * ctx.cap, seatShort = ctx.nStu > 0 && capSum < ctx.nStu ? ctx.nStu - capSum : 0;
+    return { b, secs, n: st.nb[b], gen: st.need[b * RM.R], special, dem, load: L, capSum, seatShort, tclash, over: dem.some(x => x.over) || special.some(x => x.over) || tclash.length > 0 || seatShort > 0 };
   });
   const sb = []; const spread = [];
   for (let i = 0; i < M; i++) {
@@ -1992,7 +2060,8 @@ function evalBlocks(S, g, s, G) {
   const specialOver = blocks.some(b => b.special.some(x => x.over));
   const maxN = Math.max(0, ...blocks.map(b => b.n));
   const tclash = teacherClashCount(ctx, st);
-  return { ctx, st, blocks, conflicts, unsched, spread, unplaced, teacherOver, specialOver, tclash, maxN, estConflict: sum(conflicts, c => c.w), cost: blockCost(ctx, st) };
+  const seatShort = blocks.filter(b => b.seatShort > 0).map(b => ({ b: b.b, n: b.n, cap: b.capSum, need: ctx.nStu }));
+  return { ctx, st, blocks, conflicts, unsched, spread, unplaced, teacherOver, specialOver, tclash, seatShort, maxN, estConflict: sum(conflicts, c => c.w), cost: blockCost(ctx, st) };
 }
 
 /* ==========================================================
@@ -2003,7 +2072,11 @@ function evalBlocks(S, g, s, G) {
    비용 = 100×(교과 교사·교실 초과 + 교사 개인 시간 겹침) + 8×(블록 같은 날 과다) + 3×(과목 같은 날 과다) + 2×(교사 하루 최대 초과)
    교사별 수업 배정이 있으면 지정 과목은 '수업 단위(과목×교사×시간)'로 나누어(G.subjects) 교사 개인 겹침까지 봄
    ========================================================== */
-const TT = { NA: -1, COMMON: 0, CA: 1, FREE: 2, B0: 3, PAD: -2, HARD: 100, WBD: 8, WSD: 3, WTD: 2 };
+const TT = { NA: -1, COMMON: 0, CA: 1, FREE: 2, B0: 3, PAD: -2, HARD: 100, WBD: 8, WSD: 3, WTD: 2, WFD: 3 };
+/* 남는 교시(주당 시수 < 가용 교시) 운영
+   'grade'(기본): 학년 전체가 같은 시간에 비움(하교·자습) — 빈 시간은 되도록 요일 끝, 필요하면 다른 칸과 자리를 바꿈
+   'class': 반마다 다른 시간에 둘 수 있음(학급별 자습·공강) — 남는 교시를 모두 학급별 칸으로 열어 반마다 배치 */
+const ttFreeMode = S => (S.rules && S.rules.freeMode === 'class' ? 'class' : 'grade');
 
 /* 교사 모델: 교과가 있는 교사만. off[t*n+i] = 수업 불가 */
 function teacherModel(S, slots, DM) {
@@ -2111,19 +2184,25 @@ function buildTTModel(S, sem) {
     const availCount = sum(Array.from(avail));
     const blockHours = sum(blocks, b => b.h);
     const ca = Math.min(Math.max(0, gr.ca | 0), availCount);
-    const free = availCount - blockHours - ca - Hmax;
+    const fm = ttFreeMode(S);
+    const room = Math.max(0, availCount - blockHours - ca);              // 블록·창체 뒤에 남는 칸
+    const free = fm === 'class' ? 0 : availCount - blockHours - ca - Hmax;
+    const commonN = fm === 'class' ? room : Math.min(Hmax, room);        // 학급별 수업에 쓸 수 있는 칸 수
     // 창체 위치: 이 학기에 시간표에서 직접 옮긴 위치가 있으면 그것을, 없으면 기본 설정을 사용
     const rec = S.tt[sem] || {};
     const caOv = rec.ca && Array.isArray(rec.ca[gr.g]) && rec.ca[gr.g].length ? rec.ca[gr.g] : null;
     const caIdx = [...new Set((caOv || gr.caSlots || []).map(k => tIdx.get(k)).filter(i => i != null && avail[i]))].slice(0, ca);
     const daysAvail = new Set(slots.filter((x, i) => avail[i]).map(x => x.d)).size || 1;
-    grades.push({ g: gr.g, gr, tc, avail, blocks, subjects, classes, Hmax, availCount, blockHours, ca, free, caIdx, nClass: gr.classes | 0, daysAvail });
+    // caIdx = 창체 지정 위치(기본 설정 또는 이 학기에 옮긴 위치): 고정 조건. 결과에서 바뀌었으면 판정에 표시
+    grades.push({ g: gr.g, gr, tc, avail, blocks, subjects, classes, Hmax, availCount, blockHours, ca, free, room, commonN, fm, caIdx, caOv: !!caOv, nClass: gr.classes | 0, daysAvail });
   }
   const sig = hashStr(JSON.stringify({
-    T: slots.map(x => x.key),
+    T: slots.map(x => x.key), fm: ttFreeMode(S),
     gs: grades.map(G => ({ g: G.g, av: Array.from(G.avail).join(''), bl: G.blocks.map(b => [b.key, b.h]), cl: G.classes, ca: G.ca, cai: G.caIdx, sub: G.subjects.map(x => [x.id, x.cr]) })),
   }));
-  return { S, sem, slots, T, tIdx, dayOf, D, DM, RM, TM, nT: TM.n, tmax: Math.max(0, +S.rules.tmax || 0), tcap: Math.max(1, +S.rules.std || 18) + 2, grades, sig };
+  // 요일마다 교시 순서(빈 시간 위치 비용용)
+  const dayTs = range(D).map(d => { const a = []; for (let t = 0; t < T; t++) if (slots[t].d === d) a.push(t); return a; });
+  return { S, sem, slots, T, tIdx, dayOf, dayTs, D, DM, RM, TM, nT: TM.n, tmax: Math.max(0, +S.rules.tmax || 0), tcap: Math.max(1, +S.rules.std || 18) + 2, grades, sig };
 }
 
 /* 학기별 판정에 영향을 주는 입력의 요약값(바뀌면 '다시 판정 필요') */
@@ -2132,7 +2211,15 @@ function inputSig(S, sem) {
   for (const g of [1, 2, 3]) { const k = termKey(g, sem); terms[k] = S.terms[k]; for (const G of S.terms[k].groups) { const b = S.blocks[G.id]; blocks[G.id] = b ? { assign: b.assign, locks: b.locks } : null; } }
   const rec = S.tt[sem] || {};
   const rules = { ...S.rules }; delete rules.split;   // 시수 맞춤 나누기 설정은 배치 판정과 무관(나눈 결과는 배정표로 반영됨)
-  return hashStr(JSON.stringify([S.grades, S.week, S.rooms, S.depts, rules, terms, blocks, rec.locks || null, rec.ca || null, assignSig(S, sem)]));
+  // 학생 수강신청(이 학기 선택군 과목만): 명단이 바뀌면 학생 수강·정원 판정도 다시
+  const ros = {};
+  for (const g of [1, 2, 3]) {
+    const R = S.roster && S.roster[g]; const k = termKey(g, sem);
+    if (!R || !R.students || !S.terms[k].groups.length) continue;
+    const names = new Set(S.terms[k].groups.flatMap(G => G.subjects.map(x => normName(x.name))));
+    ros[g] = R.students.map(x => x.id + ':' + (x.picks || []).filter(p => names.has(p)).sort().join(','));
+  }
+  return hashStr(JSON.stringify([S.grades, S.week, S.rooms, S.depts, rules, terms, blocks, rec.locks || null, rec.ca || null, assignSig(S, sem), ros]));
 }
 function storeVerdict(S, sem, level) {
   if (!S.tt[sem]) return;
@@ -2245,24 +2332,60 @@ function ttInit(M, saved, R) {
       common.forEach((t, i) => { A[t] = list[i]; });
       st.unplaced[gi].items += real.length - placedReal;
     });
+    // 빈 시간(하교)은 배치 중에 다른 칸과 자리를 바꿀 수 있게 고정을 풂(고정은 창체·사용자가 고정한 블록만)
+    for (let t = 0; t < M.T; t++) if (L[t] === TT.FREE) lock[t] = 0;
   });
   return st;
 }
+/* 블록·학급 수업이 모두 놓였는지 다시 셈(저장한 배치를 불러올 때도 같은 값): 모자란 블록 시간·학급 수업 */
+function ttCountUnplaced(M, st) {
+  return M.grades.map((G, gi) => {
+    const L = st.L[gi]; let blocks = 0, items = 0;
+    G.blocks.forEach((B, k) => { let n = 0; for (let t = 0; t < M.T; t++) if (L[t] === TT.B0 + k) n++; blocks += Math.max(0, B.h - n); });
+    G.classes.forEach((list, c) => { const A = st.A[gi][c]; let n = 0; for (let t = 0; t < M.T; t++) if (L[t] === TT.COMMON && A[t] >= 0) n++; items += Math.max(0, list.length - n); });
+    return { blocks, items };
+  });
+}
+/* 저장된 배치를 복원(구조가 같을 때만) — 칸마다 값의 범위, 수업 개수(중복·누락), 창체·빈 시간 수를 입력과 대조해
+   맞지 않으면 null(손상 자료: 다시 계산). 미배치 시수는 저장값 대신 복원한 배열로 다시 셈 */
 function ttLoad(M, saved) {
-  // 저장된 배치를 복원(구조가 같을 때만)
-  if (!saved || saved.sig !== M.sig || !saved.L) return null;
+  if (!saved || saved.sig !== M.sig || !saved.L || !saved.A) return null;
   const st = ttEmpty(M);
   try {
     M.grades.forEach((G, gi) => {
-      const L = saved.L[G.g]; if (!L || L.length !== M.T) throw new Error('L');
+      const L = saved.L[G.g]; if (!Array.isArray(L) || L.length !== M.T) throw new Error('L');
       st.L[gi].set(L);
-      const A = saved.A[G.g]; if (!A || A.length !== G.nClass) throw new Error('A');
-      A.forEach((row, c) => { if (row.length !== M.T) throw new Error('A2'); st.A[gi][c].set(row); });
+      const A = saved.A[G.g]; if (!Array.isArray(A) || A.length !== G.nClass) throw new Error('A');
+      A.forEach((row, c) => { if (!Array.isArray(row) || row.length !== M.T) throw new Error('A2'); st.A[gi][c].set(row); });
+      const Lg = st.L[gi], nB = G.blocks.length, nS = G.subjects.length;
+      let ca = 0, free = 0, common = 0;
+      for (let t = 0; t < M.T; t++) {
+        const lab = Lg[t];
+        if (!G.avail[t]) { if (lab !== TT.NA) throw new Error('NA'); continue; }
+        if (lab === TT.CA) ca++; else if (lab === TT.FREE) free++; else if (lab === TT.COMMON) common++;
+        else if (!(lab >= TT.B0 && lab < TT.B0 + nB)) throw new Error('lab');
+      }
+      if (ca !== G.ca || free !== Math.max(0, G.free) || (G.fm === 'class' && free)) throw new Error('ca/free');
+      G.blocks.forEach((B, k) => { let n = 0; for (let t = 0; t < M.T; t++) if (Lg[t] === TT.B0 + k) n++; if (n > B.h || (n < B.h && common > 0)) throw new Error('block'); });
+      G.classes.forEach((list, c) => {
+        const row = st.A[gi][c], cnt = new Map(); let pad = 0, n = 0;
+        for (let t = 0; t < M.T; t++) {
+          if (Lg[t] !== TT.COMMON) continue;
+          const si = row[t];
+          if (si === TT.PAD) { pad++; continue; }
+          if (!(si >= 0 && si < nS) || !G.subjects[si].targets.includes(c + 1)) throw new Error('A3');
+          cnt.set(si, (cnt.get(si) || 0) + 1); n++;
+        }
+        const need = new Map(); for (const si of list) need.set(si, (need.get(si) || 0) + 1);
+        for (const [si, k] of cnt) if (k > (need.get(si) || 0)) throw new Error('dup');      // 같은 수업이 시수보다 많음
+        if (n < list.length && pad > 0) throw new Error('lost');                              // 빈 칸이 있는데 수업이 빠짐
+      });
       const sl = (saved.locks && saved.locks[G.g]) || {};
-      for (let t = 0; t < M.T; t++) { const lab = st.L[gi][t]; if (lab === TT.CA || lab === TT.FREE) st.lockT[gi][t] = 1; }
-      for (const key of Object.keys(sl)) { const t = M.tIdx.get(key); if (t != null && st.L[gi][t] >= TT.B0) st.lockT[gi][t] = 1; }
+      for (let t = 0; t < M.T; t++) if (Lg[t] === TT.CA) st.lockT[gi][t] = 1;
+      for (const key of Object.keys(sl)) { const t = M.tIdx.get(key); if (t != null && Lg[t] >= TT.B0) st.lockT[gi][t] = 1; }
     });
   } catch (e) { return null; }
+  st.unplaced = ttCountUnplaced(M, st);
   return st;
 }
 function ttSave(S, M, st, extra = {}) {
@@ -2335,6 +2458,20 @@ function ttSubjSpread(M, st, gi, c, si, d, sign) {
   const arr = st.sday[gi][c], i = si * M.D + d, mx = st.smax[gi][si];
   const before = Math.max(0, arr[i] - mx); arr[i] += sign; st.spS += Math.max(0, arr[i] - mx) - before;
 }
+/* 빈 시간(하교) 위치: 요일 끝에 모여 있으면 0, 수업 사이에 끼면 칸마다 1(학년 단위 하교 모드의 선호 조건) */
+function ttFreeDay(M, st, gi, d) {
+  const L = st.L[gi], ts = M.dayTs[d]; let seenWork = false, n = 0;
+  for (let i = ts.length - 1; i >= 0; i--) { const lab = L[ts[i]]; if (lab === TT.NA) continue; if (lab === TT.FREE) { if (seenWork) n++; } else seenWork = true; }
+  return n;
+}
+function ttFreeInit(M, st) {
+  st.fday = M.grades.map((G, gi) => Int16Array.from(range(M.D).map(d => (G.free > 0 ? ttFreeDay(M, st, gi, d) : 0))));
+  st.spF = sum(st.fday, a => sum(Array.from(a)));
+}
+function ttFreeUpdate(M, st, gi, days) {
+  if (!(M.grades[gi].free > 0)) return;
+  for (const d of days) { const o = st.fday[gi][d], n = ttFreeDay(M, st, gi, d); st.fday[gi][d] = n; st.spF += n - o; }
+}
 function ttAggregate(M, st) {
   st.dem = new Int16Array(M.T * M.DM.n); st.need = new Int16Array(M.T * M.RM.R);
   const nT = M.nT;
@@ -2346,8 +2483,9 @@ function ttAggregate(M, st) {
   st.viol = new Float64Array(M.T); st.hard = 0;
   for (let t = 0; t < M.T; t++) { st.viol[t] = ttSlotViol(M, st, t); st.hard += st.viol[t]; }
   ttSpreadInit(M, st);
+  ttFreeInit(M, st);
 }
-const ttCost = st => TT.HARD * st.hard + TT.WBD * st.spB + TT.WSD * st.spS + TT.WTD * (st.spT || 0) + (st.rb ? TTW.LB * st.lb + TTW.PR * (st.prw || 1) * st.np + TTW.OV * st.ov : 0);
+const ttCost = st => TT.HARD * st.hard + TT.WBD * st.spB + TT.WSD * st.spS + TT.WTD * (st.spT || 0) + TT.WFD * (st.spF || 0) + (st.rb ? TTW.LB * st.lb + TTW.PR * (st.prw || 1) * st.np + TTW.OV * st.ov : 0);
 
 /* ---------- 이동(스왑) ---------- */
 function ttSwapGrade(M, st, gi, t1, t2) {
@@ -2357,6 +2495,7 @@ function ttSwapGrade(M, st, gi, t1, t2) {
   for (const A of st.A[gi]) { x = A[t1]; A[t1] = A[t2]; A[t2] = x; }
   ttSpreadSlot(M, st, gi, t1, 1); ttSpreadSlot(M, st, gi, t2, 1);
   ttContrib(M, st, gi, t1, 1); ttContrib(M, st, gi, t2, 1);
+  if (st.fday) { const d1 = M.dayOf[t1], d2 = M.dayOf[t2]; ttFreeUpdate(M, st, gi, d1 === d2 ? [d1] : [d1, d2]); }
   const o = st.viol[t1] + st.viol[t2];
   st.viol[t1] = ttSlotViol(M, st, t1); st.viol[t2] = ttSlotViol(M, st, t2);
   st.hard += st.viol[t1] + st.viol[t2] - o;
@@ -2432,9 +2571,10 @@ function ttSwapClass(M, st, gi, c, t1, t2) {
 /* ---------- 담금질 ---------- */
 async function ttAnneal(M, st, R, iters, onProg, opts = {}) {
   const G = M.grades;
-  const blockGrades = G.map((g, gi) => gi).filter(gi => G[gi].blocks.length > 0);
+  // 학년 단위 자리 바꾸기: 블록이 있거나 빈 시간(하교)이 있는 학년. 빈 시간도 다른 칸과 바꿀 수 있음(교사 불가 시간·학년 간 교사 공유 해결)
+  const blockGrades = G.map((g, gi) => gi).filter(gi => G[gi].blocks.length > 0 || G[gi].free > 0);
   const classGrades = G.map((g, gi) => gi).filter(gi => G[gi].nClass > 0 && G[gi].subjects.length > 0);
-  const commonSlots = G.map((g, gi) => { const a = []; for (let t = 0; t < M.T; t++) if (!st.lockT[gi][t] && st.L[gi][t] >= TT.COMMON && st.L[gi][t] !== TT.CA && st.L[gi][t] !== TT.FREE) a.push(t); return a; });
+  const commonSlots = G.map((g, gi) => { const a = []; for (let t = 0; t < M.T; t++) { const lab = st.L[gi][t]; if (!st.lockT[gi][t] && lab !== TT.NA && lab !== TT.CA) a.push(t); } return a; });
   if (!blockGrades.length && !classGrades.length) return;
   const nT = M.nT;
   const reassign = !!opts.reassign && nT > 0;
@@ -2533,7 +2673,7 @@ async function ttAnneal(M, st, R, iters, onProg, opts = {}) {
       const gi = blockGrades[(R() * blockGrades.length) | 0];
       const cs = commonSlots[gi]; if (cs.length < 2) continue;
       let t1;
-      if (viol.length && R() < 0.5) { t1 = viol[(R() * viol.length) | 0]; if (st.lockT[gi][t1] || st.L[gi][t1] < TT.COMMON || st.L[gi][t1] === TT.CA || st.L[gi][t1] === TT.FREE) continue; }
+      if (viol.length && R() < 0.5) { t1 = viol[(R() * viol.length) | 0]; if (st.lockT[gi][t1] || st.L[gi][t1] === TT.NA || st.L[gi][t1] === TT.CA) continue; }
       else t1 = cs[(R() * cs.length) | 0];
       const t2 = cs[(R() * cs.length) | 0];
       if (t1 === t2 || st.L[gi][t1] === st.L[gi][t2]) continue;
@@ -2565,6 +2705,11 @@ async function ttAnneal(M, st, R, iters, onProg, opts = {}) {
 /* 배치 계산(상태에 저장하지 않음): 여러 번 시도해 가장 좋은 안 */
 async function ttSolve(S, sem, opts = {}) {
   const M = buildTTModel(S, sem);
+  // 교사 조정을 한 교과 묶음으로 한정(진단 시뮬레이션): 그 밖의 자동 배정 칸은 고정
+  if (opts.onlyTop) M.grades.forEach(G => {
+    G.subjects.forEach(sj => { if (sj.cand && deptTop(S, sj.deptId) !== opts.onlyTop) sj.cand = null; });
+    G.blocks.forEach(B => B.secs.forEach(x => { if (x.cand && deptTop(S, x.deptId) !== opts.onlyTop) x.cand = null; }));
+  });
   const saved = S.tt[sem];
   const seed0 = opts.seed ?? (saved && saved.seed) ?? 1;
   const totalClasses = sum(M.grades, G => G.nClass);
@@ -2765,15 +2910,72 @@ function ttWhoUses(M, st, t, d) {
   });
   return out;
 }
+/* 입력 점검(배치 전, 원본 입력 기준): 시간표에 정확히 옮길 수 없는 입력은 운영 곤란으로 막음
+   - 소수 학점(1.5 등): 요일·교시에 놓을 수 없음 / 선택군 과목 학점 ≠ 블록 시간: 블록에는 블록 시간만큼만 들어감
+   - 대상 반: 입력이 있는데 해석된 반이 없음(오류) · 일부를 읽지 못하거나 학급 수를 넘는 번호(확인)
+   - 블록 좌석: 학생이 블록마다 한 과목씩 들으므로 블록마다 학생 전원이 앉을 분반 필요
+   - 교원 수 < 교사 명단(교원 수를 줄였는데 일이 있는 교사 칸이 남음) */
+function ttInputIssues(S, sem) {
+  const out = [];
+  const where = g => `${g}학년 ${sem}학기`;
+  for (const gr of S.grades) {
+    if (!gr.classes) continue;
+    const g = gr.g, T = S.terms[termKey(g, sem)]; if (!T) continue;
+    for (const x of T.subjects) {
+      const nm = x.name || '(이름 없음)';
+      if (!crInt(x.cr)) out.push({ k: 'bad', kind: 'cr', t: `${where(g)} ${nm}: 소수 학점 ${x.cr}은 시간표에 놓을 수 없습니다`, fix: '학점을 정수로 고치세요(격주·학기 일부 운영은 정수 시간으로 넣고 따로 조정).' });
+      const ck = classSpecCheck(x.cls, gr.classes);
+      if (!ck.blank && !ck.targets.length) out.push({ k: 'bad', kind: 'cls', t: `${where(g)} ${nm}: 대상 반 '${x.cls}'을(를) 해석하지 못해 수업이 0반입니다`, fix: `[${navT('curr')}]에서 대상 반을 비우거나(전체 반) 1-3, 앞반·뒷반처럼 고치세요.` });
+      else if (ck.bad.length || ck.out.length) out.push({ k: 'warn', kind: 'cls', t: `${where(g)} ${nm}: 대상 반 '${x.cls}' 중 ${ck.bad.length ? `읽지 못한 글자(${ck.bad.join(', ')})` : ''}${ck.bad.length && ck.out.length ? ' · ' : ''}${ck.out.length ? `학급 수(${gr.classes}반) 범위 밖 ${ck.out.join('·')}반` : ''}은 빼고 ${classSpecText(ck.targets, gr.classes)}만 배치합니다`, fix: `[${navT('curr')}]에서 대상 반을 확인하세요.` });
+    }
+    const cap = capOf(S);
+    for (const G of T.groups) {
+      const gc = calcGroup(S, g, G); if (!(gc.K > 0)) continue;
+      if (!crInt(G.cr)) out.push({ k: 'bad', kind: 'cr', t: `${where(g)} ${G.name}: 블록 시간 ${G.cr}이 정수가 아닙니다`, fix: '선택군 블록 시간(학점)을 정수로 고치세요.' });
+      const odd = gc.rows.filter(r => r.sec > 0 && (+r.sj.cr || 0) !== (+G.cr || 0));
+      if (odd.length) out.push({ k: 'bad', kind: 'cr', t: `${where(g)} ${G.name}(블록 ${+G.cr || 0}시간): 학점이 다른 과목 ${odd.map(r => `${r.sj.name} ${r.sj.cr}학점`).join(', ')} — 블록에는 ${+G.cr || 0}시간만 들어가 시수가 달라집니다`, fix: '과목 학점을 블록 시간과 같게 고치거나, 학점이 다른 과목은 학점이 같은 다른 선택군으로 옮기세요.' });
+      if (gc.seat.short > 0) {
+        const tip = seatFixPlan(S, g, G, gc.seat.short).map(x => `${x.name} ${x.from}→${x.to}반`).join(', ');
+        out.push({ k: 'bad', kind: 'seat', t: `${where(g)} ${G.name}(택${gc.pick}): 학생 ${gc.students}명이 ${gc.pick}개 블록마다 한 과목씩 들어 블록마다 ${gc.seat.q}개 분반(정원 ${cap}명)이 필요합니다 — 최소 ${gc.seat.need}반인데 개설 ${gc.K}반(분반 ${gc.seat.short}개 부족)`, fix: `[${navT('sections')}]에서 분반 ${gc.seat.short}개를 더 여세요${tip ? `(제안: ${tip})` : ''}. 허용 초과 인원을 늘려도 됩니다.` });
+      }
+    }
+    // 창체: 가용 교시를 넘으면 모델이 줄여 넣으므로 입력 단계에서 막음
+    const av = gradeAvailKeys(S, g).length;
+    if ((+gr.ca || 0) > av) out.push({ k: 'bad', kind: 'ca', t: `${g}학년: 창체 ${gr.ca}시간 > 수업 가능 ${av}교시`, fix: '창체 시간을 줄이거나 교시를 늘리세요(기본 설정).' });
+    if (!crInt(gr.ca)) out.push({ k: 'bad', kind: 'ca', t: `${g}학년: 창체 ${gr.ca}시간이 정수가 아닙니다`, fix: '창체 시간을 정수로 고치세요.' });
+  }
+  for (const x of teacherCountIssues(S)) out.push({ k: 'warn', kind: 'tcount', t: `${x.d.name}: 교원 수 ${x.t}명인데 교사 명단은 ${x.named}명입니다(시간표·시수표는 ${x.named}명으로 계산)`, fix: `실제 교원 수가 ${x.t}명이면 [${navT('teach')}]에서 남는 교사의 담당 수업을 다른 교사에게 넘기고 교사 칸을 지우세요. ${x.named}명이 맞으면 [${navT('depts')}]의 교원 수를 ${x.named}명으로 고치세요.` });
+  return out;
+}
+/* 블록 좌석이 모자랄 때 분반을 늘릴 과목 제안: 반당 인원이 가장 많은 과목부터 한 반씩 */
+function seatFixPlan(S, g, G, short) {
+  const gc = calcGroup(S, g, G); const add = new Map();
+  const rows = gc.rows.filter(r => r.sec > 0 && r.app > 0);
+  for (let k = 0; k < short && rows.length; k++) {
+    let best = null, bv = -1;
+    for (const r of rows) { const v = r.app / (r.sec + (add.get(r.sj.id) || 0)); if (v > bv) { bv = v; best = r; } }
+    add.set(best.sj.id, (add.get(best.sj.id) || 0) + 1);
+  }
+  return rows.filter(r => add.has(r.sj.id)).map(r => ({ id: r.sj.id, name: r.sj.name, from: r.sec, to: r.sec + add.get(r.sj.id) }));
+}
+/* 제안대로 분반을 늘림(개설 반 수동 조정 값으로 남김): 늘린 과목 목록 */
+function applySeatFix(S, g, G) {
+  const gc = calcGroup(S, g, G); if (!(gc.seat.short > 0)) return [];
+  const plan = seatFixPlan(S, g, G, gc.seat.short);
+  for (const x of plan) { const sj = G.subjects.find(y => y.id === x.id); if (sj) sj.sec = x.to; }
+  return plan;
+}
 /* 확실한 불가 요인(배치와 무관) + 확인 필요 항목 */
 function ttPrechecks(M) {
-  const out = [];
+  const out = ttInputIssues(M.S, M.sem);
   const { DM, RM } = M;
   const totalPool = RM.genBase + sum(range(RM.R).filter(r => RM.share[r]), r => RM.cnt[r]);
   const famLabel = (o) => DM.list[o.d].name + (o.agg ? '(교과 전체)' : '');
+  const modeFix = '[기본 설정]에서 남는 교시를 「반마다 다른 시간(학급별 자습)」으로 바꾸면 반마다 다른 교시에 둘 수 있습니다.';
   for (const G of M.grades) {
-    const need = G.blockHours + G.ca + G.Hmax;
-    if (need > G.availCount) out.push({ k: 'bad', t: `${G.g}학년: 주당 필요 ${need}시간(선택 블록 ${G.blockHours} + 지정 과목 ${G.Hmax} + 창체 ${G.ca}) > 수업 가능 ${G.availCount}시간`, fix: '교시를 늘리거나(기본 설정) 지정 과목·선택군 학점을 줄이세요.' });
+    // 주당 시간: 원본 입력(소수 학점·창체 그대로) 기준
+    const tc = G.tc, need = tc.blockHours + tc.maxClass + (+G.gr.ca || 0);
+    if (need > G.availCount) out.push({ k: 'bad', t: `${G.g}학년: 주당 필요 ${need}시간(선택 블록 ${tc.blockHours} + 지정 과목 ${tc.maxClass} + 창체 ${+G.gr.ca || 0}) > 수업 가능 ${G.availCount}시간`, fix: '교시를 늘리거나(기본 설정) 지정 과목·선택군 학점을 줄이세요.' });
     for (const B of G.blocks) {
       if (!(B.h > 0) || !B.secs.length) continue;
       const dem = new Int16Array(DM.n); for (const [d, c] of B.dc) dem[d] += c;
@@ -2796,15 +2998,16 @@ function ttPrechecks(M) {
       for (let r = 1; r < RM.R; r++) if (nd[r] > RM.cnt[r]) out.push({ k: 'bad', t: `${G.g}학년 ${B.label} 블록: ${RM.types[r].name} ${nd[r]}실 필요 / ${RM.cnt[r]}실`, fix: '특별실 수를 늘리거나 해당 과목 반을 다른 블록으로 옮기세요.' });
       if (nd[0] > totalPool) out.push({ k: 'bad', t: `${G.g}학년 ${B.label} 블록: 일반교실 ${nd[0]}실이 동시에 필요하지만 학교 전체 ${totalPool}실`, fix: '여유 교실을 늘리거나 분반 수를 조정하세요.' });
     }
-    // 학급별 수업 시간 안에 특별실·교사 수요가 들어가는지
-    const sc = Math.min(G.Hmax, Math.max(0, G.availCount - G.blockHours - G.ca));
+    // 학급별 수업 시간 안에 특별실·교사 수요가 들어가는지(학년 단위 하교면 학급별 칸 = 가장 많은 반의 시수, 학급별 자습이면 남는 칸 전부)
+    const sc = G.commonN, scAlt = G.room;
     if (sc > 0) {
       const rDem = new Int32Array(RM.R), dDem = new Int32Array(DM.n);
       G.classes.forEach(items => items.forEach(si => { const sj = G.subjects[si]; rDem[sj.room]++; if (sj.dept >= 0) dDem[sj.dept]++; }));
-      for (let r = 1; r < RM.R; r++) if (rDem[r] > sc * RM.cnt[r]) out.push({ k: 'bad', t: `${G.g}학년: ${RM.types[r].name}을(를) 쓰는 학급 수업 ${rDem[r]}시간이 학급별 수업 시간 ${sc}교시 × ${RM.cnt[r]}실 = ${sc * RM.cnt[r]}시간 안에 들어가지 않습니다`, fix: `${RM.types[r].name} 수를 늘리거나(기본 설정), ${G.g}학년 선택 블록 시간을 줄이거나, 해당 과목의 교실을 바꾸세요.` });
+      for (let r = 1; r < RM.R; r++) if (rDem[r] > sc * RM.cnt[r]) { const alt = G.fm === 'grade' && rDem[r] <= scAlt * RM.cnt[r]; out.push({ k: 'bad', mode: alt, t: `${G.g}학년: ${RM.types[r].name}을(를) 쓰는 학급 수업 ${rDem[r]}시간이 학급별 수업 시간 ${sc}교시 × ${RM.cnt[r]}실 = ${sc * RM.cnt[r]}시간 안에 들어가지 않습니다${alt ? '(남는 교시를 학년 전체가 같은 시간에 비우는 경우)' : ''}`, fix: alt ? modeFix : `${RM.types[r].name} 수를 늘리거나(기본 설정), ${G.g}학년 선택 블록 시간을 줄이거나, 해당 과목의 교실을 바꾸세요.` }); }
       const scaled = { ...DM, T: DM.T.map(x => x * sc) };
       const over = []; deptOver(dDem, 0, scaled, over);
-      for (const o of over) out.push({ k: 'bad', t: `${G.g}학년: ${famLabel(o)} 학급 수업 ${o.need}시간이 학급별 수업 시간 ${sc}교시 × 교사 ${o.cap / sc}명 안에 들어가지 않습니다`, fix: `${DM.list[o.d].name} 교원을 늘리거나 ${G.g}학년 선택 블록 시간을 줄이세요.` });
+      const overAlt = []; if (G.fm === 'grade' && scAlt > sc) deptOver(dDem, 0, { ...DM, T: DM.T.map(x => x * scAlt) }, overAlt);
+      for (const o of over) { const alt = G.fm === 'grade' && scAlt > sc && !overAlt.some(x => x.d === o.d && !!x.agg === !!o.agg); out.push({ k: 'bad', mode: alt, t: `${G.g}학년: ${famLabel(o)} 학급 수업 ${o.need}시간이 학급별 수업 시간 ${sc}교시 × 교사 ${o.cap / sc}명 안에 들어가지 않습니다${alt ? '(남는 교시를 학년 전체가 같은 시간에 비우는 경우)' : ''}`, fix: alt ? modeFix : `${DM.list[o.d].name} 교원을 늘리거나 ${G.g}학년 선택 블록 시간을 줄이세요.` }); }
     }
   }
   // 교과별 주당 총수요와 교원(수업이 있는 모든 교시 기준)
@@ -2842,8 +3045,8 @@ function ttPrechecks(M) {
       let avail = 0; for (let t = 0; t < M.T; t++) if (!M.TM.off[t * M.nT + i] && M.grades.some(G => G.avail[t])) avail++;
       if (load[i] > avail) out.push({ k: 'bad', t: `${TMl[i].name}: 맡은 수업 주 ${load[i]}시간 > 수업할 수 있는 ${avail}교시`, fix: `[교사별 수업 배정]에서 ${TMl[i].name} 교사의 수업 일부를 다른 교사에게 나누거나 수업 불가 시간을 줄이세요.` });
       M.grades.forEach((G, gi) => {
-        const cs = Math.min(G.Hmax, Math.max(0, G.availCount - G.blockHours - G.ca));
-        if (loadG[gi][i] > cs) out.push({ k: 'bad', t: `${TMl[i].name}: ${G.g}학년 학급 수업 ${loadG[gi][i]}시간 > ${G.g}학년 학급별 수업 시간 ${cs}교시(한 사람이 같은 시간에 두 반을 못 맡음)`, fix: `${G.g}학년 ${TMl[i].name} 교사의 반 일부를 다른 교사에게 나누세요.` });
+        const cs = G.commonN;
+        if (loadG[gi][i] > cs) { const alt = G.fm === 'grade' && loadG[gi][i] <= G.room; out.push({ k: 'bad', mode: alt, t: `${TMl[i].name}: ${G.g}학년 학급 수업 ${loadG[gi][i]}시간 > ${G.g}학년 학급별 수업 시간 ${cs}교시(한 사람이 같은 시간에 두 반을 못 맡음)${alt ? ' — 남는 교시를 학년 전체가 같은 시간에 비우는 경우' : ''}`, fix: alt ? modeFix : `${G.g}학년 ${TMl[i].name} 교사의 반 일부를 다른 교사에게 나누세요.` }); }
       });
     }
   }
@@ -2856,18 +3059,150 @@ function ttPrechecks(M) {
   if (un.size) out.push({ k: 'warn', t: `교과가 지정되지 않은 과목 ${un.size}개(주 ${sum([...un.values()])}시간)는 교사 점검에서 빠져 있습니다: ${[...un.entries()].slice(0, 6).map(([n, h]) => `${n}(${h}시간)`).join(', ')}${un.size > 6 ? ' 등' : ''}`, fix: '[편제·수강신청]에서 과목의 교과(전공)를 지정하세요.' });
   return out;
 }
+/* ---------- 확정 전 점검(판정에 합침) ---------- */
+/* 학생 수강: 명단이 있는 학년의 선택군마다 분반 배정을 돌려 실패·미개설·택 수·정원 초과를 셈(배치 위치와 무관 → 입력이 같으면 캐시) */
+const _stuCache = new Map();
+function ttStudentCheck(S, sem) {
+  const out = { groups: [], failed: [], unopened: [], wrong: [], tooMany: [], over: [], std: [], noRoster: [], rosterGap: [], checked: 0 };
+  const keyParts = [sem, S.rules.cap, S.rules.tol];
+  const work = [];
+  for (const gr of S.grades) {
+    if (!gr.classes) continue;
+    const T = S.terms[termKey(gr.g, sem)]; if (!T || !T.groups.length) continue;
+    const groups = T.groups.filter(G => calcGroup(S, gr.g, G).K > 0); if (!groups.length) continue;
+    const R = S.roster && S.roster[gr.g];
+    if (!R || !R.students || !R.students.length) { out.noRoster.push(gr.g); continue; }
+    if ((+gr.students || 0) && R.students.length !== +gr.students) out.rosterGap.push({ g: gr.g, roster: R.students.length, students: +gr.students });
+    const names = new Set(groups.flatMap(G => G.subjects.map(x => normName(x.name))));
+    keyParts.push(gr.g, R.students.map(x => [x.id, (x.picks || []).filter(p => names.has(p)).sort().join(',')]), groups.map(G => [G.id, G.pick, G.cr, G.students, G.subjects.map(x => [x.name, x.app, x.sec, x.cr]), (S.blocks[G.id] || {}).assign || null]));
+    work.push({ g: gr.g, groups });
+  }
+  const key = hashStr(JSON.stringify(keyParts));
+  if (_stuCache.has(key)) return _stuCache.get(key);
+  for (const w of work) for (const G of w.groups) {
+    ensureBlocks(S, w.g, sem, G);
+    const a = assignStudents(S, w.g, sem, G); if (!a) continue;
+    out.checked += a.targets || 0;
+    const tag = x => ({ g: w.g, gname: G.name, ...x });
+    a.failed.forEach(x => out.failed.push(tag(x)));
+    (a.unopened || []).forEach(x => out.unopened.push(tag(x)));
+    (a.wrongCount || []).forEach(x => out.wrong.push(tag({ ...x, pick: G.pick })));
+    (a.tooMany || []).forEach(x => out.tooMany.push(tag(x)));
+    a.sections.filter(x => x.over).forEach(x => out.over.push(tag({ name: x.name, n: x.n, size: x.size, cap: a.cap, block: x.block })));
+    a.sections.filter(x => x.std).forEach(x => out.std.push(tag({ name: x.name, n: x.n, size: x.size, cap: a.capStd, block: x.block })));
+    out.groups.push({ g: w.g, gname: G.name, targets: a.targets || 0, seatShort: a.ev.seatShort || [] });
+  }
+  if (_stuCache.size > 40) _stuCache.clear();
+  _stuCache.set(key, out);
+  return out;
+}
+/* 시수 대조: 원본 입력(과목 학점·대상 반·블록 시간·창체)과 배치 결과의 실제 칸 수를 따로 세어 비교 */
+function ttReconcile(M, st) {
+  const S = M.S, items = [];
+  M.grades.forEach((G, gi) => {
+    const L = st.L[gi], T = S.terms[termKey(G.g, M.sem)], n = G.nClass;
+    for (const x of T.subjects) {
+      const need = +x.cr || 0; if (!(need > 0)) continue;
+      for (const c of parseClassSpec(x.cls, n)) {
+        const A = st.A[gi][c - 1]; let got = 0;
+        for (let t = 0; t < M.T; t++) if (L[t] === TT.COMMON && A[t] >= 0 && G.subjects[A[t]].sid === x.id) got++;
+        if (got !== need) items.push({ g: G.g, what: `${c}반 ${x.name}`, need, got });
+      }
+    }
+    for (const Gr of T.groups) {
+      const gc = calcGroup(S, G.g, Gr); if (!(gc.K > 0)) continue;
+      const need = +Gr.cr || 0;
+      for (let b = 0; b < gc.pick; b++) {
+        const k = G.blocks.findIndex(B => B.gid === Gr.id && B.b === b); let got = 0;
+        if (k >= 0) for (let t = 0; t < M.T; t++) if (L[t] === TT.B0 + k) got++;
+        if (got !== need) items.push({ g: G.g, what: `${Gr.name} ${BL[b]}블록`, need, got });
+      }
+      for (const r of gc.rows) if (r.sec > 0 && (+r.sj.cr || 0) !== need) items.push({ g: G.g, what: `${Gr.name} ${r.sj.name}`, need: +r.sj.cr || 0, got: need });
+    }
+    const caNeed = +G.gr.ca || 0; let caGot = 0; for (let t = 0; t < M.T; t++) if (L[t] === TT.CA) caGot++;
+    if (caGot !== caNeed) items.push({ g: G.g, what: '창체', need: caNeed, got: caGot });
+  });
+  return items;
+}
+/* 교사 배정 범위: 교사를 정한 수업 시간 ÷ 전체 수업 시간(교양 등 겸임 교과 포함) */
+function ttTeacherCoverage(S, sem) {
+  const L = teacherLoads(S, sem);
+  const asg = sum([...L.loads.values()], x => x.total), un = sum(L.unassigned, u => u.h);
+  const byDept = new Map(); for (const u of L.unassigned) { const top = deptTop(S, u.dept); const nm = top ? deptOf(S, top).name : '교과 미지정'; byDept.set(nm, (byDept.get(nm) || 0) + u.h); }
+  const free = sum(L.unassigned.filter(u => isFreeDept(S, u.dept)), u => u.h);
+  return { asg, un, free, pct: asg + un ? Math.round(asg / (asg + un) * 1000) / 10 : 100, byDept: [...byDept.entries()].sort((a, b) => b[1] - a[1]) };
+}
+function ttConfirmChecks(M, st, ev, ctx) {
+  const S = M.S, sem = M.sem, out = [];
+  const lim = (arr, f, n = 4) => arr.slice(0, n).map(f).join(', ') + (arr.length > n ? ` 외 ${arr.length - n}` : '');
+  // 1) 시수 대조
+  const rec = ctx.rec;
+  out.push(rec.length
+    ? { key: 'hours', label: '과목·반·블록 시수', level: 'bad', text: `입력과 실제 배치가 다른 곳 ${rec.length}곳: ${lim(rec, x => `${x.g}학년 ${x.what} ${x.got}/${x.need}시간`)}` }
+    : { key: 'hours', label: '과목·반·블록 시수', level: 'good', text: '모든 지정 과목·블록·창체가 입력한 시간만큼 놓였습니다.' });
+  // 2) 학생 수강
+  const sc = ctx.stu;
+  if (sc.groups.length) {
+    const probs = [];
+    if (sc.failed.length) probs.push(`신청 과목을 모두 들을 수 없는 학생 ${sc.failed.length}명(${lim(sc.failed, x => `${x.id} ${x.subjects.join('·')}`, 3)})`);
+    if (sc.unopened.length) probs.push(`미개설 과목을 신청한 학생 ${sc.unopened.length}명(${lim(sc.unopened, x => `${x.id} ${x.subjects.join('·')}`, 3)})`);
+    const zero = sc.wrong.filter(x => x.n === 0), wrongN = sc.wrong.filter(x => x.n > 0);
+    if (wrongN.length) probs.push(`택 수가 맞지 않는 학생 ${wrongN.length}명(${lim(wrongN, x => `${x.id} ${x.n}과목/택${x.pick}`, 3)})`);
+    if (zero.length) probs.push(`선택 과목 미신청(0과목) 학생 ${zero.length}명(${lim(zero, x => x.id, 4)})`);
+    if (sc.tooMany.length) probs.push(`블록 수보다 많이 신청한 학생 ${sc.tooMany.length}명`);
+    const gap = sc.rosterGap.map(x => `${x.g}학년 명단 ${x.roster}명/학생 수 ${x.students}명`);
+    out.push(probs.length
+      ? { key: 'students', label: '학생 수강', level: 'warn', text: probs.join(' · ') }
+      : { key: 'students', label: '학생 수강', level: 'good', text: `명단 학생 ${sc.checked}명(선택군별 합)이 신청한 과목을 서로 다른 블록에서 모두 듣습니다.${gap.length ? ` (${gap.join(', ')} — 명단에 없는 학생은 점검하지 못함)` : ''}` });
+  }
+  if (sc.noRoster.length) out.push({ key: 'students-none', label: '학생 수강(명단 없음)', level: 'info', text: `${sc.noRoster.join('·')}학년은 학생 명단이 없어 신청 인원으로만 개설했습니다. 학생별 수강 가능 여부는 수강신청 결과(학생별 내역)를 올리면 점검합니다.` });
+  // 3) 분반 정원
+  if (sc.groups.length) {
+    const cap = capOf(S), capStd = Math.max(1, +S.rules.cap || 29);
+    const seat = sc.groups.flatMap(x => x.seatShort.map(b => ({ ...b, g: x.g, gname: x.gname })));
+    if (sc.over.length || seat.length) out.push({ key: 'capacity', label: '분반 정원', level: 'warn', text: [sc.over.length ? `유효 정원(${cap}명)을 넘는 분반 ${sc.over.length}개: ${lim(sc.over, x => `${x.g}학년 ${x.name} ${x.n}분반 ${x.size}명`)}` : '', seat.length ? `좌석이 모자란 블록: ${lim(seat, x => `${x.g}학년 ${x.gname} ${BL[x.b]}블록 ${x.cap}석/학생 ${x.need}명`)}` : ''].filter(Boolean).join(' · ') });
+    else out.push({ key: 'capacity', label: '분반 정원', level: sc.std.length ? 'info' : 'good', text: sc.std.length ? `모든 분반이 유효 정원(기준 ${capStd}명 + 허용 ${cap - capStd}명) 이내입니다. 기준 초과·허용 범위 이내 분반 ${sc.std.length}개: ${lim(sc.std, x => `${x.g}학년 ${x.name} ${x.n}분반 ${x.size}명`)}` : `모든 분반이 정원(${cap}명) 이내입니다.` });
+  }
+  // 4) 교사 배정 범위
+  const cov = ctx.cov;
+  if (cov.un > 0) out.push({ key: 'teachers', label: '교사 배정', level: 'warn', text: `교사를 정한 수업 ${cov.pct}%(미배정 주 ${cov.un}시간: ${lim(cov.byDept, ([n, h]) => `${n} ${h}`, 5)}). 미배정 수업은 교과 교원 수로만 점검했고${cov.free ? `, 교양(겸임) ${cov.free}시간은 교사 점검이 없습니다` : ''}. 확정하려면 [${navT('teach')}]에서 모든 수업에 교사를 정하세요.` });
+  else out.push({ key: 'teachers', label: '교사 배정', level: 'good', text: '모든 수업(교양 포함)에 교사를 정했고, 교사 한 사람 단위로 겹침·수업 불가 시간을 점검했습니다.' });
+  // 5) 교원 수 = 교사 명단
+  const tci = teacherCountIssues(S);
+  if (tci.length) out.push({ key: 'tcount', label: '교원 수·교사 명단', level: 'warn', text: tci.map(x => `${x.d.name} 교원 ${x.t}명 / 명단 ${x.named}명`).join(', ') });
+  // 6) 창체 위치(지정 위치는 고정 조건)
+  const moved = [];
+  M.grades.forEach((G, gi) => { const L = st.L[gi]; const lost = G.caIdx.filter(t => L[t] !== TT.CA); if (lost.length) { const now = []; for (let t = 0; t < M.T; t++) if (L[t] === TT.CA && !G.caIdx.includes(t)) now.push(M.slots[t].label); moved.push(`${G.g}학년 ${lost.map(t => M.slots[t].label).join('·')} → ${now.join('·') || '없음'}`); } });
+  if (moved.length) out.push({ key: 'ca', label: '창체 위치', level: 'warn', text: `지정한 창체 위치에 고정(🔒)한 블록이 있어 창체를 옮겼습니다: ${moved.join(' / ')}교시. 블록 고정을 풀거나 창체 위치를 바꾸세요(지정한 창체 위치는 고정 조건입니다).` });
+  else if (M.grades.some(G => G.caIdx.length)) out.push({ key: 'ca', label: '창체 위치', level: 'good', text: '지정한 위치에 창체를 두었습니다.' });
+  // 7) 하교·빈 시간
+  const midFree = M.grades.filter((G, gi) => st.fday && sum(Array.from(st.fday[gi])) > 0).map(G => G.g);
+  if (midFree.length) out.push({ key: 'free', label: '빈 시간 위치', level: 'info', text: `${midFree.join('·')}학년은 수업 사이에 학년 전체 빈 시간(자습)이 있습니다(교사·교실 조건을 맞추려고 옮김).` });
+  // 8) 하루 최대 수업(권장)
+  if (ev.tday && ev.tday.length) out.push({ key: 'tmax', label: '교사 하루 최대(권장)', level: 'info', text: `권장 ${M.tmax}교시를 넘는 날 ${ev.tday.length}건: ${lim(ev.tday, x => `${x.name} ${x.day} ${x.n}교시`, 3)} — 선호 조건이라 판정에는 영향이 없습니다.` });
+  out.push({ key: 'scope', label: '점검하지 않는 항목', level: 'info', text: '창체 담당 교사, 교실 호수, 교실 간 이동 시간, 반드시 이어 붙여야 하는 수업(연강)은 이 도구에서 점검하지 않습니다.' });
+  return out;
+}
 function ttVerdict(M, st, ev) {
   const pre = ttPrechecks(M);
   const bad = pre.filter(x => x.k === 'bad'), warnPre = pre.filter(x => x.k === 'warn');
   const reasons = [], fixes = [];
   const addFix = f => { if (f && !fixes.includes(f)) fixes.push(f); };
-  if (!M.grades.length) return { level: 'none', title: '입력 필요', msg: '학급 수와 과목을 입력하면 판정합니다.', reasons, fixes, pre };
+  if (!M.grades.length) return { level: 'none', title: '입력 필요', msg: '학급 수와 과목을 입력하면 판정합니다.', reasons, fixes, pre, checks: [], scope: null };
+  const S = M.S;
+  const ctx = { rec: ttReconcile(M, st), stu: ttStudentCheck(S, M.sem), cov: ttTeacherCoverage(S, M.sem) };
+  const checks = ttConfirmChecks(M, st, ev, ctx);
+  const scope = ctx.cov.un > 0 || !M.nT ? 'dept' : 'teacher';
+  const chkWarn = checks.filter(c => c.level === 'warn' && c.key !== 'teachers');
+  const chkFix = { students: '[블록 편성]에서 [자동 편성]을 다시 하거나 분반을 늘리고, 수강신청 명단(택 수·미개설 과목 신청)을 확인하세요. 학생별 내역은 [학생 명단]에서 봅니다.', capacity: '[블록 편성]에서 [정원 맞추기]로 분반을 다른 블록으로 옮겨 보고, 남으면 [개설 학급·확대학급]에서 그 과목의 분반을 늘리세요(허용 초과 인원으로 정원을 넓힐 수도 있습니다).', ca: '[시간표·운영 판정]에서 창체 칸에 고정한 블록의 고정(🔒)을 풀거나, [기본 설정]에서 창체 위치를 바꾸세요.' };
   if (bad.length) {
     bad.forEach(x => { reasons.push(x.t); addFix(x.fix); });
     warnPre.forEach(x => { reasons.push(x.t); addFix(x.fix); });
-    return { level: 'bad', title: '현재 조건으로는 운영이 어렵습니다', msg: '배치 방법과 관계없이 해결해야 하는 조건이 있습니다.', reasons, fixes, pre };
+    const onlyMode = bad.every(x => x.mode);
+    return { level: 'bad', title: '현재 조건으로는 운영이 어렵습니다', msg: onlyMode ? '남는 교시를 학년 전체가 같은 시간에 비우는 조건에서는 풀 수 없습니다(조건을 바꾸면 가능할 수 있음).' : '배치 방법과 관계없이 해결해야 하는 조건(입력·여건의 모순)이 있습니다.', reasons, fixes, pre, checks, scope };
   }
-  if (ev.hard > 0 || ev.unplaced > 0) {
+  const recBad = ctx.rec.length > 0 && !(ev.unplaced > 0);
+  if (ev.hard > 0 || ev.unplaced > 0 || recBad) {
     const byDept = new Map(); let roomSlots = 0, roomMax = 0; const spRooms = new Map();
     for (const v of ev.violations) {
       for (const o of v.over) { const nm = M.DM.list[o.d].name + (o.agg ? '(교과 전체)' : ''); const x = byDept.get(nm) || { n: 0, max: 0 }; x.n++; x.max = Math.max(x.max, o.need - o.cap - (o.pcap || 0)); byDept.set(nm, x); }
@@ -2877,22 +3212,31 @@ function ttVerdict(M, st, ev) {
     if (ev.tconf && ev.tconf.length) {
       const names = new Map(); for (const x of ev.tconf) for (const y of x.tconf) names.set(y.name, (names.get(y.name) || 0) + 1);
       reasons.push(`교사 시간 겹침: ${ev.tconf.length}개 시간대 — ${[...names.entries()].slice(0, 6).map(([n, k]) => `${n} ${k}번`).join(', ')}${names.size > 6 ? ' 등' : ''}`);
-      addFix('[다른 배치 시도]로 새 배치를 찾아보고, 계속 겹치면 [교사별 수업 배정]에서 겹치는 교사의 반·분반을 다른 교사에게 나누거나 [교과별 설계 안내]의 충돌 진단(시뮬레이션)으로 원인 교과를 찾으세요.');
+      addFix(`[다른 배치 시도]로 새 배치를 찾아보고, 계속 겹치면 [${navT('teach')}]에서 겹치는 교사의 반·분반을 다른 교사에게 나누거나 [${navT('dguide')}]의 충돌 진단(시뮬레이션)으로 원인 교과를 찾으세요.`);
     }
     if (roomSlots) reasons.push(`일반교실: ${roomSlots}개 시간대에서 최대 ${roomMax}실 부족`);
     for (const [nm, n] of spRooms) reasons.push(`${nm}: ${n}개 시간대에서 부족`);
     if (ev.unplaced) reasons.push(`배치하지 못한 시수 ${ev.unplaced}시간`);
+    if (recBad) { reasons.push(`입력과 배치 시수가 다른 곳 ${ctx.rec.length}곳(${ctx.rec.slice(0, 3).map(x => `${x.g}학년 ${x.what} ${x.got}/${x.need}`).join(', ')})`); addFix('[자동 배치 다시 실행]으로 새로 배치하세요.'); }
+    chkWarn.forEach(c => { reasons.push(`${c.label}: ${c.text}`); addFix(chkFix[c.key]); });
     warnPre.forEach(x => { reasons.push(x.t); addFix(x.fix); });
-    if (byDept.size || spRooms.size) addFix('[다른 배치 시도]로 새 배치를 찾아보고, 계속 남으면 [블록 편성]에서 해당 교과 반을 다른 블록으로 옮기거나 교원(강사)을 늘리세요.');
-    if (roomSlots) addFix(`[기본 설정]에서 여유 교실을 ${roomMax}실 이상 확보하거나, 블록 동시 개설 반 수를 줄이세요.`);
-    return { level: 'warn', title: '조정이 필요합니다', msg: '배치안에 교사·교실이 모자라는 시간이 남아 있습니다.', reasons, fixes, pre };
+    if (byDept.size || spRooms.size) addFix(`[다른 배치 시도]로 새 배치를 찾아보고, 계속 남으면 [${navT('blocks')}]에서 해당 교과 반을 다른 블록으로 옮기거나 교원(강사)을 늘리세요.`);
+    if (roomSlots) addFix(`[${navT('settings')}]에서 여유 교실을 ${roomMax}실 이상 확보하거나, 블록 동시 개설 반 수를 줄이세요.`);
+    if (M.grades.some(G => G.fm === 'grade' && G.free > 0)) addFix('남는 교시를 반마다 다른 시간에 둘 수 있으면 [기본 설정]에서 「반마다 다른 시간(학급별 자습)」을 고르면 배치 여지가 넓어집니다.');
+    return { level: 'warn', title: '조정이 필요합니다', msg: '자동 배치가 교사·교실 조건을 모두 맞추는 배치를 아직 찾지 못했습니다(조건상 불가능하다는 뜻은 아닙니다).', reasons, fixes, pre, checks, scope };
   }
-  if (warnPre.length) {
+  if (chkWarn.length || warnPre.length) {
+    chkWarn.forEach(c => { reasons.push(`${c.label}: ${c.text}`); addFix(chkFix[c.key]); });
     warnPre.forEach(x => { reasons.push(x.t); addFix(x.fix); });
-    return { level: 'warn', title: '확인이 필요합니다', msg: '배치는 가능하지만 점검에서 빠진 항목이 있습니다.', reasons, fixes, pre };
+    const stuProb = chkWarn.some(c => c.key === 'students' || c.key === 'capacity');
+    return { level: 'warn', title: stuProb ? '조정이 필요합니다(학생 수강)' : '확인이 필요합니다', msg: stuProb ? '교사·교실 배치는 가능하지만, 학생 수강 신청·분반 정원에서 해결할 문제가 있습니다.' : '배치는 가능하지만 입력에서 확인할 항목이 있습니다.', reasons, fixes, pre, checks, scope };
   }
   const tightSlots = ev.slots.filter(x => x.tight).length;
-  return { level: 'good', title: '운영 가능합니다', msg: `모든 시간대에서 교실과 교과 교사가 충분합니다${ev.teacherMode ? '. 교사별로 맡은 수업도 서로 겹치지 않습니다' : ''}${tightSlots ? ` (여유 없는 시간대 ${tightSlots}개)` : ''}.`, reasons, fixes, pre };
+  const title = scope === 'teacher' ? '운영 가능합니다(교사 개인 단위까지 확인)' : '운영 가능합니다(교과·교실 인원 기준)';
+  const msg = scope === 'teacher'
+    ? `모든 시간대에서 교실과 교사가 충분하고, 교사마다 맡은 수업이 겹치지 않습니다${tightSlots ? ` (여유 없는 시간대 ${tightSlots}개)` : ''}.`
+    : `모든 시간대에서 교실과 교과 교사(인원)가 충분합니다${tightSlots ? ` (여유 없는 시간대 ${tightSlots}개)` : ''}. 교사를 정하지 않은 수업은 교사 개인 겹침까지는 확인하지 않았으므로, 확정 전에 교사 배정을 마치세요.`;
+  return { level: 'good', title, msg, reasons, fixes, pre, checks, scope };
 }
 
 /* ==========================================================
@@ -2983,15 +3327,16 @@ function rosterSummary(S, g) {
   for (const s of [1, 2]) for (const G of S.terms[termKey(g, s)].groups) {
     const names = new Map(G.subjects.map(x => [normName(x.name), x]));
     const cnt = new Map(G.subjects.map(x => [x.id, 0]));
-    const dist = new Map();
+    const dist = new Map(); let zero = 0;
+    const allTarget = G.students == null || G.students === '';
     for (const st of R.students) {
       const p = (st.picks || []).filter(n => names.has(n));
-      if (!p.length) continue;
+      if (!p.length) { if (allTarget) zero++; continue; }
       dist.set(p.length, (dist.get(p.length) || 0) + 1);
       for (const n of p) { const x = names.get(n); cnt.set(x.id, cnt.get(x.id) + 1); }
     }
     const inGroup = sum([...dist.values()]);
-    out.push({ s, G, rows: G.subjects.map(x => ({ x, roster: cnt.get(x.id), entered: +x.app || 0 })), dist: [...dist.entries()].sort((a, b) => a[0] - b[0]), inGroup });
+    out.push({ s, G, rows: G.subjects.map(x => ({ x, roster: cnt.get(x.id), entered: +x.app || 0 })), dist: [...dist.entries()].sort((a, b) => a[0] - b[0]), inGroup, zero });
   }
   return out;
 }
@@ -3029,12 +3374,63 @@ function assignStudents(S, g, s, G) {
   const choose = p => { let best = null, bc = Infinity; for (const o of p.opts) { const c = optCost(p, o); if (c < bc) { bc = c; best = o; } } if (best) place(p, best); };
   const order = plans.slice().sort((a, b) => a.opts.length - b.opts.length);
   for (const p of order) if (p.opts.length) choose(p);
-  for (let pass = 0; pass < 4; pass++) for (const p of order) if (p.opts.length > 1) { unplace(p); choose(p); }
+  // 고쳐 앉히기: 정원 초과가 남아 있으면 더 돌림(초과가 없어지거나 더 줄지 않을 때까지, 최대 30번)
+  const overSum = () => { let v = 0; for (let i = 0; i < size.length; i++) if (size[i] > cap) v += size[i] - cap; return v; };
+  for (let pass = 0, prev = Infinity; pass < 30; pass++) {
+    for (const p of order) if (p.opts.length > 1) { unplace(p); choose(p); }
+    const v = overSum(); if (pass >= 3 && (v === 0 || v >= prev)) break; prev = v;
+  }
   for (const p of plans) if (p.pick) p.pick.forEach(i => members[i].push(p.st));
-  const sections = ctx.secs.map((sc, i) => ({ key: sc.key, name: ctx.subj[sc.si].name, n: sc.n, total: ctx.subj[sc.si].sec, block: ev.st.blk[i], size: size[i], over: size[i] > cap, students: members[i].slice().sort((a, b) => String(a.id).localeCompare(String(b.id), 'ko', { numeric: true })) }));
+  const capStd = ctx.capStd || cap;
+  const sections = ctx.secs.map((sc, i) => ({ key: sc.key, name: ctx.subj[sc.si].name, n: sc.n, total: ctx.subj[sc.si].sec, block: ev.st.blk[i], size: size[i], over: size[i] > cap, std: size[i] > capStd && size[i] <= cap, students: members[i].slice().sort((a, b) => String(a.id).localeCompare(String(b.id), 'ko', { numeric: true })) }));
   const failed = plans.filter(p => !p.opts.length).map(p => ({ id: p.st.id, name: p.st.name, subjects: p.st.subj.map(i => ctx.subj[i].name) }));
   const perStudent = plans.filter(p => p.pick).map(p => ({ id: p.st.id, name: p.st.name, items: p.pick.map(i => ({ block: ev.st.blk[i], name: ctx.subj[ctx.secs[i].si].name, n: ctx.secs[i].n, total: ctx.subj[ctx.secs[i].si].sec })).sort((a, b) => a.block - b.block) }));
-  return { ev, sections, failed, tooMany: tooMany.map(x => ({ id: x.id, name: x.name, n: x.subj.length })), unopened: ros.unopened, wrongCount: ros.wrongCount, perStudent, cap, N };
+  return { ev, sections, failed, tooMany: tooMany.map(x => ({ id: x.id, name: x.name, n: x.subj.length })), unopened: ros.unopened, wrongCount: ros.wrongCount, perStudent, cap, capStd, N, targets: ros.targets };
+}
+
+/* 분반 정원 맞추기: 실제 학생 분반 배정으로 배정 실패·정원 초과를 세어, 고정(🔒)하지 않은 분반을 다른 블록으로 옮기거나
+   다른 블록의 분반과 맞바꿔 줄임. 블록의 교사·교실·좌석 조건(편성 비용의 큰 항목)이 나빠지는 이동은 하지 않음 */
+function blockCapacityScore(S, g, s, G) {
+  const a = assignStudents(S, g, s, G); if (!a) return null;
+  const ev = a.ev; let over = 0; const hot = new Set();
+  for (const x of a.sections) if (x.size > a.cap) { over += x.size - a.cap; hot.add(x.key.split(':')[0]); }
+  const hard = ev.blocks.reduce((v, B) => v + B.dem.filter(d => d.over).length + B.special.filter(r => r.over).length + B.tclash.length + (B.seatShort > 0 ? 1 : 0) + (B.gen > ev.ctx.genCap ? 1 : 0), 0);
+  return { failed: a.failed.length, over, hard, cost: ev.cost, hot };
+}
+function repairBlockCapacity(S, g, s, G, opts = {}) {
+  const rec = S.blocks[G.id]; if (!rec || !rec.assign || !(S.roster && S.roster[g])) return null;
+  const locks = rec.locks || {}; const N = calcGroup(S, g, G).pick;
+  const before = blockCapacityScore(S, g, s, G); if (!before) return null;
+  let cur = before, moves = 0, evals = 0; const maxEval = opts.maxEval || 400;
+  const better = (a, b) => a.hard <= b.hard && (a.failed < b.failed || (a.failed === b.failed && (a.over < b.over || (a.over === b.over && a.cost < b.cost - 1e-9 && a.over > 0))));
+  for (let round = 0; round < 4 && (cur.failed || cur.over) && evals < maxEval; round++) {
+    let improved = false;
+    const keys = Object.keys(rec.assign).filter(k => !locks[k]);
+    // 정원을 넘는 과목의 분반, 그 분반과 같은 블록의 분반부터
+    const hotB = new Set(keys.filter(k => cur.hot.has(k.split(':')[0])).map(k => rec.assign[k]));
+    keys.sort((x, y) => (cur.hot.has(y.split(':')[0]) ? 2 : hotB.has(rec.assign[y]) ? 1 : 0) - (cur.hot.has(x.split(':')[0]) ? 2 : hotB.has(rec.assign[x]) ? 1 : 0));
+    for (const k of keys) {
+      if (evals >= maxEval) break;
+      const b0 = rec.assign[k]; let done = false;
+      for (let b = 0; b < N && !done; b++) {
+        if (b === b0) continue;
+        rec.assign[k] = b; evals++;
+        const sc = blockCapacityScore(S, g, s, G);
+        if (better(sc, cur)) { cur = sc; moves++; improved = done = true; } else rec.assign[k] = b0;
+      }
+      if (done) continue;
+      // 다른 블록의 분반과 맞바꾸기(블록별 분반 수 유지)
+      for (const k2 of keys) {
+        if (evals >= maxEval || done) break;
+        const b2 = rec.assign[k2]; if (b2 === b0 || k2.split(':')[0] === k.split(':')[0]) continue;
+        rec.assign[k] = b2; rec.assign[k2] = b0; evals++;
+        const sc = blockCapacityScore(S, g, s, G);
+        if (better(sc, cur)) { cur = sc; moves++; improved = done = true; } else { rec.assign[k] = b0; rec.assign[k2] = b2; }
+      }
+    }
+    if (!improved) break;
+  }
+  return { before: { failed: before.failed, over: before.over }, after: { failed: cur.failed, over: cur.over }, moves, evals };
 }
 
 /* ==========================================================
@@ -3304,6 +3700,28 @@ function syncTeacherSlots(S) {
     for (let k = have; k < want; k++) { S.teachers.push({ id: uid('t'), name: nextTeacherName(S, d), dept: d.id, off: [] }); added++; }
   }
   return added;
+}
+/* 교원 수를 줄였을 때: 명단 뒤쪽부터 담당 수업·수업 불가 시간이 없고 이름을 바꾸지 않은 교사 칸('국어5' 등)만 지움.
+   일이 있는 교사 칸은 남기고, 남은 차이는 판정에서 '교원 수 ≠ 교사 명단'으로 알림. 지운 수를 돌려줌 */
+function teacherHasWork(S, tid) {
+  for (const sem of ['1', '2']) {
+    const A = S.assign && S.assign[sem]; if (!A) continue;
+    for (const per of Object.values(A.des || {})) for (const ps of Object.values(per || {})) if ((ps || []).some(p => p && p.t === tid)) return true;
+    for (const e of Object.values(A.sec || {})) if (e && e.t === tid) return true;
+  }
+  return false;
+}
+function trimTeacherSlots(S, deptId) {
+  const d = deptOf(S, deptId); if (!d) return 0;
+  const want = Math.max(0, Math.round(+d.t || 0));
+  let removed = 0;
+  const re = new RegExp('^' + d.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\d+$');
+  for (let i = (S.teachers || []).length - 1; i >= 0 && S.teachers.filter(t => t.dept === deptId).length > want; i--) {
+    const t = S.teachers[i];
+    if (t.dept !== deptId || !re.test(t.name) || (t.off || []).length || teacherHasWork(S, t.id)) continue;
+    S.teachers.splice(i, 1); removed++;
+  }
+  return removed;
 }
 function nextTeacherName(S, d) { const used = new Set((S.teachers || []).map(t => t.name)); for (let k = 1; ; k++) { const nm = `${d.name}${k}`; if (!used.has(nm)) return nm; } }
 /* 교과별 교원 수와 명단 수 맞추기(명단이 많으면 교원 수를 올림) */
@@ -4072,7 +4490,8 @@ async function ttDiagnose(S, sem, onProg) {
     const r1 = await ttSolve(S1, sem, { restarts: 1, itersScale: 0.6, onProg: p => prog(0, p) });
     const e1 = ttEvaluate(r1.M, r1.st);
     const S2 = deepClone(S); autoAssign(S2, sem, { top, redo: true });
-    const r2 = await ttSolve(S2, sem, { restarts: 1, itersScale: 0.8, reassign: true, onProg: p => prog(1, p) });
+    // 추천안은 이 교과의 자동 배정 칸만 바꿈(교양처럼 교과를 넘나드는 칸·다른 교과 칸은 그대로) → [이 추천안 적용]이 이 교과만 바꾸게
+    const r2 = await ttSolve(S2, sem, { restarts: 1, itersScale: 0.8, reassign: true, onlyTop: top, onProg: p => prog(1, p) });
     ttApplyTeachers(S2, r2.M, r2.st);
     const e2 = ttEvaluate(r2.M, r2.st);
     out.items.push({ top, relaxed: e1.tconf.length, relaxedHard: e1.hard, rec: e2.tconf.length, recHard: e2.hard, S2 });
@@ -5643,7 +6062,7 @@ PANELS.settings = {
           <label class="fld">허용 초과 인원 ${inNum('rules.tol', S.rules.tol, { label: '허용 초과 인원' })}</label>
           <label class="fld">소인수 표시(명 이하) ${inNum('rules.small', S.rules.small, { label: '소인수 기준' })}</label>
           <label class="fld">교원 기준 시수(주당) ${inNum('rules.std', S.rules.std, { min: 1, type: 'num', step: 0.5, label: '교원 기준 시수' })}</label></div>
-          <div class="note mt12 small">개설 반 수 = 신청 인원 ÷ (기준 인원 + 허용 초과)를 <b>올림</b>. 허용 초과가 0이면 기존 엑셀의 ROUNDUP(신청자수/${esc(S.rules.cap)})과 같습니다. 교원 기준 시수는 교과별 1인 평균 시수와 비교해 과부족을 판단하는 기준입니다.</div>
+          <div class="note mt12 small">개설 반 수 = 신청 인원 ÷ (기준 인원 + 허용 초과)를 <b>올림</b>. 허용 초과가 0이면 기존 엑셀의 ROUNDUP(신청자수/${esc(S.rules.cap)})과 같습니다. <b>유효 정원 ${capOf(S)}명</b>(기준 ${esc(S.rules.cap)} + 허용 ${esc(S.rules.tol || 0)})을 개설 반 수·블록 좌석·학생 분반 배정·정원 초과 판정에 똑같이 씁니다(기준을 넘고 유효 정원 이내인 분반은 '허용 범위'로 표시). 교원 기준 시수는 교과별 1인 평균 시수와 비교해 과부족을 판단하는 기준입니다.</div>
         </div>
       </div>
       <div class="card mt16"><h3>주간 수업 틀</h3>
@@ -5651,8 +6070,10 @@ PANELS.settings = {
           <span class="badge">주당 ${sum(S.week.periods)}교시</span>
           <button class="btn sm" data-act="days-toggle">${days.length === 5 ? '토요일 추가' : '토요일 제거'}</button>
           <button class="btn sm" data-act="ca-default">창체 위치 기본값</button></div>
-        <p class="card-sub">칸을 누르면 <b>수업 → 창체 → 없음</b> 순서로 바뀝니다. '없음'은 그 학년이 수업하지 않는 시간(예: 3학년 7교시 없음)입니다. 창체 칸 수가 창체 시간보다 적으면 나머지는 자동으로 배치합니다.</p>
+        <p class="card-sub">칸을 누르면 <b>수업 → 창체 → 없음</b> 순서로 바뀝니다. '없음'은 그 학년이 수업하지 않는 시간(예: 3학년 7교시 없음)입니다. 창체 칸으로 지정한 위치는 <b>고정 조건</b>입니다(시간표에서 그 칸에 블록을 고정하면 창체를 옮기고 '확인 필요'로 알림). 창체 칸 수가 창체 시간보다 적으면 나머지는 자동으로 배치합니다.</p>
         <div class="grid3">${grid}</div>
+        <div class="row mt12 small free-mode"><b>남는 교시 운영</b> ${segBtns('free-mode', S.rules.freeMode || 'grade', [['grade', '학년 전체가 같은 시간(하교)'], ['class', '반마다 다른 시간(학급별 자습)']])}
+          <span class="muted grow">주당 시수보다 수업 가능 교시가 많을 때 남는 교시를 둘 위치입니다. <b>학년 전체가 같은 시간</b>이면 학년 모든 반이 같은 교시에 하교(빈 시간)하며, 교사·교실 조건을 맞추려면 빈 시간을 다른 요일·교시로 옮기기도 합니다. <b>반마다 다른 시간</b>이면 반마다 다른 교시에 자습을 둘 수 있어 한 교사가 두 반을 서로 다른 교시에 맡는 배치를 찾을 수 있습니다.</span></div>
       </div>
       <div class="card mt16"><h3>교실</h3>
         <div class="row mb12"><span class="badge info">학급 교실 ${RM.homerooms}실(학급 수 합계)</span>
@@ -5718,7 +6139,7 @@ PANELS.depts = {
       const hasKids = st1.kids.length > 0;
       return `<tr class="${hasKids ? 'grp' : ''}"><td>${kid ? '<span class="muted" style="margin:0 4px 0 10px">└</span>' : ''}${inText(`depts.${i}.name`, d.name, { w: 'w120', label: '교과 이름' })}</td>
         <td>${hasKids ? '<span class="small muted">하위 전공 있음</span>' : inSelect(`depts.${i}.parent`, d.parent || '', parentOpts.filter(o => o[0] !== d.id), { type: 'nullstr', label: '상위 교과' })}</td>
-        <td class="c">${inNum(`depts.${i}.t`, d.t, { w: 'w50', label: d.name + ' 교원 수' })}${hasKids ? `<div class="xsmall muted">전체 ${st1.tAll}명</div>` : ''}</td>
+        <td class="c">${inNum(`depts.${i}.t`, d.t, { w: 'w50', label: d.name + ' 교원 수' })}${hasKids ? `<div class="xsmall muted">전체 ${st1.tAll}명</div>` : ''}${namedTeacherCount(S, d.id) > (+d.t || 0) ? `<div class="xsmall t-warn" title="교사별 수업 배정의 교사 명단이 교원 수보다 많습니다. 시수표·시간표는 명단 수로 계산합니다.">명단 ${namedTeacherCount(S, d.id)}명</div>` : ''}</td>
         <td class="c">${inCheck(`depts.${i}.free`, d.free, '겸임')}</td>
         <td class="c num">${hasKids ? `${st1.own}<span class="xsmall muted"> / 전체 ${st1.all}</span>` : st1.own}</td>
         <td class="c num">${hasKids ? `${st2.own}<span class="xsmall muted"> / 전체 ${st2.all}</span>` : st2.own}</td>
@@ -5740,6 +6161,19 @@ PANELS.depts = {
   },
 };
 ACTIONS['dept-add'] = () => commit(S => { S.depts.push({ id: uid('d'), name: '새 교과', t: 0, parent: null, free: false }); });
+/* 교원 수를 줄이면 담당 수업이 없는 빈 교사 칸('국어5' 등)을 함께 정리(일이 있는 교사 칸은 남기고 판정에서 알림) */
+AFTER_BIND.push([/^depts\.\d+\.t$/, (S, path, val, old) => {
+  if (!(val < old)) return;
+  const [d] = resolvePath(S, path.replace(/\.t$/, '.x')); if (!d) return;
+  const n = trimTeacherSlots(S, d.id), left = namedTeacherCount(S, d.id), over = left > (+d.t || 0);
+  const msg = over ? `${d.name}: 담당 수업이 있는 교사 칸이 ${left}명 남아 있어 시간표·시수표는 ${left}명으로 계산합니다. [${navTitle('teach')}]에서 남는 교사의 수업을 옮기고 교사 칸을 지우세요.` : n ? `${d.name}: 담당 수업이 없는 교사 칸 ${n}개를 함께 정리했습니다.` : '';
+  if (msg) setTimeout(() => toast(msg, over ? 'bad' : ''), 0);
+}]);
+ACTIONS['free-mode'] = el => {
+  const v = el.getAttribute('data-v') === 'class' ? 'class' : 'grade'; if ((App.S.rules.freeMode || 'grade') === v) return;
+  commit(S => { S.rules.freeMode = v; });
+  toast(v === 'class' ? '남는 교시를 반마다 다른 시간에 둡니다(학급별 자습). 시간표를 열면 새로 배치합니다.' : '남는 교시를 학년 전체가 같은 시간에 둡니다(하교). 시간표를 열면 새로 배치합니다.');
+};
 ACTIONS['dept-del'] = async el => {
   const id = el.getAttribute('data-id'); const S = App.S; const d = deptOf(S, id);
   const kids = S.depts.filter(x => x.parent === id);
@@ -6041,10 +6475,13 @@ PANELS.curr = {
     const desRows = t.subjects.map((x, i) => {
       const d = tc.des[i];
       const p = `terms.${key}.subjects.#${x.id}`;
+      const ck = classSpecCheck(x.cls, gr.classes);
+      const clsNote = !ck.blank && !ck.targets.length ? `<div class="xsmall t-bad">해석할 수 없음 → 0반(수업 없음)</div>`
+        : `<div class="xsmall muted">${classSpecText(d.targets, gr.classes)}${/앞|뒷|홀수|짝수/.test(x.cls || '') ? ' · 교차 이수' : ''}</div>${ck.bad.length || ck.out.length ? `<div class="xsmall t-warn">${ck.bad.length ? `읽지 못함: ${esc(ck.bad.join(', '))}` : ''}${ck.bad.length && ck.out.length ? ' · ' : ''}${ck.out.length ? `${gr.classes}반 밖: ${ck.out.join('·')}반` : ''}</div>` : ''}`;
       return `<tr><td>${inText(p + '.name', x.name, { w: 'w200', list: 'subjList', label: '과목명' })}${srcTag(x)}</td>
         <td>${inSelect(p + '.dept', x.dept || '', deptOpts, { type: 'nullstr', label: '교과' })}</td>
-        <td class="c">${inNum(p + '.cr', x.cr, { w: 'w50', label: '학점' })}</td>
-        <td>${inText(p + '.cls', x.cls, { w: 'w100', ph: '전체', label: '대상 반' })}<div class="xsmall muted">${classSpecText(d.targets, gr.classes)}${/앞|뒷|홀수|짝수/.test(x.cls || '') ? ' · 교차 이수' : ''}</div></td>
+        <td class="c">${inNum(p + '.cr', x.cr, { w: 'w50', type: 'num', step: 0.5, label: '학점' })}${crInt(x.cr) ? '' : `<div class="xsmall t-bad">소수 학점</div>`}</td>
+        <td>${inText(p + '.cls', x.cls, { w: 'w100', ph: '전체', label: '대상 반' })}${clsNote}</td>
         <td>${inSelect(p + '.room', x.room || 'gen', roomOpts, { label: '교실' })}</td>
         <td class="c num">${d.sec}반 · ${d.hours}시간</td>
         <td class="c"><button class="icon-btn" data-act="subj-del" data-id="${x.id}" aria-label="과목 삭제" title="삭제">✕</button></td></tr>`;
@@ -6076,7 +6513,7 @@ PANELS.curr = {
           <button class="btn sm danger" data-act="group-del" data-g="${G.id}">선택군 삭제</button></h3>
         <p class="card-sub">학생 1명이 이 선택군에서 ${G.pick}과목을 고릅니다 → 시간표에 ${G.pick}개 블록 × ${G.cr}시간 = 주당 ${G.pick * G.cr}시간. 대상 학생을 비우면 학년 전체(${gr.students}명).</p>
         <div class="tbl-wrap"><table class="tbl compact"><thead><tr><th>과목</th><th>교과(전공)</th><th>학점</th><th>신청 인원</th><th>개설 반(자동)</th><th>조정</th><th>교실</th><th>비고</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="9" class="c muted">과목을 추가하거나 엑셀에서 붙여넣으세요.</td></tr>'}</tbody>
-        <tfoot><tr class="sum"><td>합계</td><td></td><td></td><td class="c num">${gc.sumApp}</td><td class="c num" colspan="2">${gc.K}개 반</td><td colspan="3" class="small">행정학급 기준 ${gc.base}반(${gc.classes}학급×택${gc.pick}) · 증감 <b>${fmtSigned(gc.delta)}</b> ${mis ? badge(`신청 합계 ≠ 학생×택(${gc.expApp})`, 'warn') : gc.sumApp ? badge('신청 합계 일치', 'good') : ''}</td></tr></tfoot></table></div></div>`;
+        <tfoot><tr class="sum"><td>합계</td><td></td><td></td><td class="c num">${gc.sumApp}</td><td class="c num" colspan="2">${gc.K}개 반</td><td colspan="3" class="small">행정학급 기준 ${gc.base}반(${gc.classes}학급×택${gc.pick}) · 증감 <b>${fmtSigned(gc.delta)}</b> ${mis ? badge(`신청 합계 ≠ 학생×택(${gc.expApp})`, 'warn') : gc.sumApp ? badge('신청 합계 일치', 'good') : ''} ${seatBadge(gc)}</td></tr></tfoot></table></div>${seatNote(S, key, gc)}</div>`;
     }).join('');
     const perClass = tc.active ? `<div class="note ${tc.required > tc.avail ? 'bad' : tc.slack > 0 ? 'info' : 'good'} mt12 small">
         <b>${termLabel(key)} 주당 시간:</b> 선택 블록 ${tc.blockHours} + 지정 과목 ${tc.maxClass}${tc.minClass !== tc.maxClass ? `(반별 ${tc.minClass}~${tc.maxClass})` : ''} + 창체 ${tc.ca} = <b>${tc.required}시간</b> / 수업 가능 ${tc.avail}교시
@@ -6148,6 +6585,23 @@ ACTIONS['paste-apply'] = el => {
   closeModal(); toast(`${list.length}개 과목을 반영했습니다.`);
 };
 
+/* 블록 좌석: 택N = N개 블록, 학생은 블록마다 한 과목 → 블록마다 학생 전원이 앉을 분반(⌈학생 ÷ 유효 정원⌉) 필요 */
+function seatBadge(gc) {
+  if (!(gc.K > 0) || !(gc.students > 0)) return '';
+  return gc.seat.short > 0 ? badge(`블록 좌석 부족: 분반 ${gc.seat.short}개 더 필요`, 'bad') : `<span class="badge" title="택${gc.pick} = 블록 ${gc.pick}개, 블록마다 학생 ${gc.students}명이 앉으려면 분반 ${gc.seat.q}개(정원 ${gc.cap}명) 필요">블록 좌석 ${gc.K}/${gc.seat.need}반 이상</span>`;
+}
+function seatNote(S, key, gc) {
+  if (!(gc.seat.short > 0)) return '';
+  const plan = seatFixPlan(S, +key[0], gc.G, gc.seat.short);
+  return `<div class="note bad mt8 small"><b>블록 좌석 부족</b> — 학생 ${gc.students}명이 ${gc.pick}개 블록마다 한 과목씩 들으므로 블록마다 분반 ${gc.seat.q}개(정원 ${gc.cap}명)가 있어야 합니다. 최소 ${gc.seat.need}반인데 개설 ${gc.K}반이라 어느 블록은 좌석이 모자랍니다(분반 정원 초과가 생김).
+    ${plan.length ? `<button class="btn sm" data-act="seat-fix" data-k="${key}" data-g="${gc.G.id}">분반 추가 제안 적용: ${esc(plan.map(x => `${x.name} ${x.from}→${x.to}반`).join(', '))}</button>` : ''} <span class="muted">또는 [기본 설정]에서 허용 초과 인원을 늘리세요.</span></div>`;
+}
+ACTIONS['seat-fix'] = el => {
+  const key = el.getAttribute('data-k'), gid = el.getAttribute('data-g'); let plan = [];
+  commit(S => { const G = S.terms[key].groups.find(x => x.id === gid); if (G) plan = applySeatFix(S, +key[0], G); });
+  if (plan.length) toast(`분반을 늘렸습니다: ${plan.map(x => `${x.name} ${x.from}→${x.to}반`).join(', ')} (조정 칸에 기록, 블록은 다시 편성)`);
+};
+
 /* ---------- 개설 학급·확대학급 ---------- */
 PANELS.sections = {
   render() {
@@ -6161,7 +6615,7 @@ PANELS.sections = {
     const cap = S.rules.cap;
     const sumRows = all.map(({ key, gc }) => `<tr><td class="c">${termLabel(key)}</td><td class="c">${esc(gc.G.name)}</td><td class="c num">택${gc.pick}</td><td class="c num">${gc.students}</td><td class="c num">${gc.sumApp}${gc.diffApp && gc.sumApp ? ` <span class="xsmall" style="color:var(--warn)">(${fmtSigned(gc.diffApp)})</span>` : ''}</td>
       <td class="c num">${gc.rows.filter(r => r.sec > 0).length}/${gc.rows.length}</td><td class="c num"><b>${gc.K}</b></td><td class="c num">${gc.base}</td>
-      <td class="c num ${gc.delta > 0 ? 'cell-warn' : gc.delta < 0 ? 'cell-good' : ''}"><b>${fmtSigned(gc.delta)}</b></td><td class="c num">${fmtSigned(gc.addHours)}</td><td class="c num">${gc.maxPerBlock}</td><td class="c num">${gc.extraRooms ? '+' + gc.extraRooms : 0}</td><td class="c num">${gc.avgSize != null ? fmt(gc.avgSize, 1) : '–'}</td></tr>`).join('');
+      <td class="c num ${gc.seat.short > 0 || gc.delta > 0 ? 'cell-warn' : gc.delta < 0 ? 'cell-good' : ''}"><b>${fmtSigned(gc.delta)}</b></td><td class="c num ${gc.seat.short > 0 ? 'cell-bad' : ''}" title="택${gc.pick} = 블록 ${gc.pick}개, 블록마다 학생 ${gc.students}명이 앉을 분반 ${gc.seat.q}개 필요">${gc.K > 0 ? `${gc.seat.need}${gc.seat.short > 0 ? ` <b>(${gc.seat.short} 부족)</b>` : ''}` : '–'}</td><td class="c num">${fmtSigned(gc.addHours)}</td><td class="c num">${gc.maxPerBlock}</td><td class="c num">${gc.extraRooms ? '+' + gc.extraRooms : 0}</td><td class="c num">${gc.avgSize != null ? fmt(gc.avgSize, 1) : '–'}</td></tr>`).join('');
     const tot = { K: sum(all, x => x.gc.K), base: sum(all, x => x.gc.base), delta: sum(all, x => x.gc.delta), h: sum(all, x => x.gc.addHours) };
     const view = App.ui.secView || 'v';
     const details = all.map(({ key, gc }, idx) => {
@@ -6186,15 +6640,15 @@ PANELS.sections = {
           <td class="c">${inNum(q + '.sec', x.sj.sec, { w: 'w50', type: 'intnull', ph: '자동', ov: x.manual, label: '개설 반 조정' })}</td><td class="c num"><b>${x.sec}</b></td>
           <td class="c num ${x.avg != null && x.avg > cap ? 'cell-warn' : ''}">${x.avg != null ? fmt(x.avg, 1) : '–'}</td><td class="c num">${x.blockMax}</td><td class="small">${flagsHtml(x.flags)}</td></tr>`;
       }).join('');
-      return `<div class="card mt12"><h3>${termLabel(key)} · ${esc(gc.G.name)} <span class="badge acc">택${gc.pick}</span> <span class="badge">대상 ${gc.students}명</span> <span class="badge ${gc.delta > 0 ? 'warn' : gc.delta < 0 ? 'good' : ''}">행정학급 대비 ${fmtSigned(gc.delta)}반</span><span class="grow"></span>${copyBtn(id, '표 복사', `${termLabel(key)} ${gc.G.name} 개설 학급`)}</h3>
+      return `<div class="card mt12"><h3>${termLabel(key)} · ${esc(gc.G.name)} <span class="badge acc">택${gc.pick}</span> <span class="badge">대상 ${gc.students}명</span> <span class="badge ${gc.delta > 0 ? 'warn' : gc.delta < 0 ? 'good' : ''}">행정학급 대비 ${fmtSigned(gc.delta)}반</span> ${seatBadge(gc)}<span class="grow"></span>${copyBtn(id, '표 복사', `${termLabel(key)} ${gc.G.name} 개설 학급`)}</h3>${seatNote(S, key, gc)}
         <div class="tbl-wrap"><table class="tbl compact" id="${id}"><thead><tr><th>과목</th><th>교과(전공)</th><th>신청</th><th>예상 학급수(÷${cap})</th><th>자동</th><th>조정</th><th>확정</th><th>반당 인원</th><th title="확정 반 수 ÷ 택 수(올림): 한 블록에 동시에 열어야 하는 최대 반 수">블록당 최대 동시</th><th>비고</th></tr></thead><tbody>${rows}</tbody>
         <tfoot><tr class="sum"><td>합계</td><td></td><td class="c num">${gc.sumApp}</td><td></td><td></td><td></td><td class="c num">${gc.K}</td><td class="c num">${gc.avgSize != null ? fmt(gc.avgSize, 1) : '–'}</td><td class="c num">${gc.maxPerBlock}/블록</td><td class="small">기준 ${gc.base}반(${gc.classes}학급×택${gc.pick}) → 확대 ${fmtSigned(gc.delta)}반, 주 ${fmtSigned(gc.addHours)}시간</td></tr></tfoot></table></div></div>`;
     }).join('');
     return `<div class="panel-head"><div><h2>${navTitle('sections')}</h2><p>과목별 개설 반 수 = 신청 인원 ÷ ${cap}명(올림). <b>행정학급 기준</b>은 학급 수 × 택 수(모든 학급이 블록마다 한 반씩 여는 경우), <b>증감</b>은 실제 개설 반과의 차이로, +이면 확대학급(추가 교실·교사·시수)이 필요합니다.</p></div>
       <div class="row">${segBtns('sec-view', view, [['v', '세로형'], ['h', '엑셀형(가로)']])}${copyBtn('secSumTbl', '요약표 복사', '선택군 요약(개설 학급·확대학급)')}</div></div>
-      <div class="card"><h3>선택군 요약</h3><div class="tbl-wrap"><table class="tbl compact" id="secSumTbl"><thead><tr><th>학년·학기</th><th>선택군</th><th>택</th><th>대상 학생</th><th>신청 합계</th><th>개설 과목</th><th>개설 반</th><th>행정학급 기준</th><th>증감(확대)</th><th>추가 시수/주</th><th>블록당 동시</th><th>추가 교실</th><th>평균 반 인원</th></tr></thead><tbody>${sumRows}</tbody>
-        <tfoot><tr class="sum"><td class="c" colspan="6">합계</td><td class="c num">${tot.K}</td><td class="c num">${tot.base}</td><td class="c num">${fmtSigned(tot.delta)}</td><td class="c num">${fmtSigned(tot.h)}</td><td colspan="3" class="small">학기 평균 주 ${fmtSigned(tot.h / 2, 1)}시간 ≈ 교원 ${fmt(Math.abs(tot.h / 2) / Math.max(1, +S.rules.std || 18), 1)}명분</td></tr></tfoot></table></div>
-        <p class="card-sub mt8">추가 시수 = 증감 반 수 × 블록 시간. 두 학기 합계이므로 학기 평균을 교원 기준 시수(${esc(S.rules.std)}시간)로 나누면 확대학급 운영에 드는 교원 규모를 가늠할 수 있습니다. 추가 교실 = 블록당 동시 개설 반 수 − 학년 학급 수. 학년 학급 교실만으로 부족한 만큼 여유 교실이나 특별실이 필요합니다(학년 간 겹침은 [시간표·운영 판정]에서 점검).</p></div>
+      <div class="card"><h3>선택군 요약</h3><div class="tbl-wrap"><table class="tbl compact" id="secSumTbl"><thead><tr><th>학년·학기</th><th>선택군</th><th>택</th><th>대상 학생</th><th>신청 합계</th><th>개설 과목</th><th>개설 반</th><th>행정학급 기준</th><th>증감(확대)</th><th title="학생은 블록마다 한 과목씩 들으므로 블록마다 학생 전원이 앉을 분반이 필요: 택 수 × ⌈학생 ÷ 정원⌉">블록 좌석 최소 반</th><th>추가 시수/주</th><th>블록당 동시</th><th>추가 교실</th><th>평균 반 인원</th></tr></thead><tbody>${sumRows}</tbody>
+        <tfoot><tr class="sum"><td class="c" colspan="6">합계</td><td class="c num">${tot.K}</td><td class="c num">${tot.base}</td><td class="c num">${fmtSigned(tot.delta)}</td><td></td><td class="c num">${fmtSigned(tot.h)}</td><td colspan="3" class="small">학기 평균 주 ${fmtSigned(tot.h / 2, 1)}시간 ≈ 교원 ${fmt(Math.abs(tot.h / 2) / Math.max(1, +S.rules.std || 18), 1)}명분</td></tr></tfoot></table></div>
+        <p class="card-sub mt8"><b>블록 좌석 최소 반</b> = 택 수 × ⌈대상 학생 ÷ 정원(${capOf(S)}명)⌉. 학생은 블록마다 한 과목씩 들으므로 개설 반이 이보다 적으면(증감이 −여도) 어느 블록은 좌석이 모자라 분반 정원을 넘게 됩니다. 추가 시수 = 증감 반 수 × 블록 시간. 두 학기 합계이므로 학기 평균을 교원 기준 시수(${esc(S.rules.std)}시간)로 나누면 확대학급 운영에 드는 교원 규모를 가늠할 수 있습니다. 추가 교실 = 블록당 동시 개설 반 수 − 학년 학급 수. 학년 학급 교실만으로 부족한 만큼 여유 교실이나 특별실이 필요합니다(학년 간 겹침은 [시간표·운영 판정]에서 점검).</p></div>
       ${details}`;
   },
 };
@@ -6870,9 +7324,9 @@ PANELS.blocks = {
       const demHtml = B.dem.map(d => `<span class="badge ${d.over ? 'bad' : d.borrow ? 'warn' : d.need === d.cap ? 'acc' : ''}" title="${d.agg ? '교과 전체 합산' : '전공'}: 동시에 필요한 교사 ${d.need}명 / 보유 ${d.cap}명${d.borrow ? ' — 모자라는 만큼 상위 교과 교원이 맡아야 함' : ''}">${esc(ctx.DM.list[d.d].name)}${d.agg ? '(전체)' : ''} ${d.need}/${d.cap}</span>`).join('');
       const spHtml = B.special.map(r => `<span class="badge ${r.over ? 'bad' : ''}">${esc(r.name)} ${r.need}/${r.cap}</span>`).join('');
       const genCap = ctx.genCap;
-      const loadTxt = ctx.Sg ? `예상 ${fmt(B.load, 0)}명 / 수용 ${B.capSum}명` : '';
+      const loadTxt = ctx.nStu ? `학생 ${ctx.nStu}명 / 좌석 ${B.capSum}석${B.seatShort ? ` <span class="badge bad">${B.seatShort}석 부족</span>` : ''}` : '';
       return `<div class="bcol" data-drop="${B.b}" data-act="blk-move" data-b="${B.b}">
-        <div class="bcol-head bk${B.b % 8}"><div class="t"><span>${BL[B.b]} 블록</span><span class="badge">${B.n}개 반</span></div><div class="m">${loadTxt}</div>${times[B.b] ? `<div class="m" title="[시간표·운영 판정]의 ${cur.s}학기 배치">시간: ${times[B.b].join(' · ')}</div>` : ''}</div>
+        <div class="bcol-head bk${B.b % 8}"><div class="t"><span>${BL[B.b]} 블록</span><span class="badge">${B.n}개 반</span></div><div class="m" title="학생은 블록마다 한 과목씩 들으므로 블록의 분반 수 × 정원(${ctx.cap}명)이 학생 수 이상이어야 합니다">${loadTxt}</div>${times[B.b] ? `<div class="m" title="[시간표·운영 판정]의 ${cur.s}학기 배치">시간: ${times[B.b].join(' · ')}</div>` : ''}</div>
         <div class="bcol-body">${chips || '<span class="muted small">비어 있음</span>'}</div>
         <div class="bcol-foot">
           <div class="kv"><span>일반교실</span><span class="${B.gen > genCap ? 'badge bad' : ''}">${B.gen} / ${genCap}실</span></div>
@@ -6897,6 +7351,12 @@ PANELS.blocks = {
          ${ev.conflicts.length ? `<div class="tbl-wrap"><table class="tbl compact"><thead><tr><th>블록</th><th>과목 A</th><th>과목 B</th><th>추정 동시 신청</th></tr></thead><tbody>${ev.conflicts.slice(0, 20).map(c => `<tr><td class="c">${BL[c.block]}</td><td>${esc(c.a.name)}</td><td>${esc(c.b.name)}</td><td class="c num">${fmt(c.w, 1)}명</td></tr>`).join('')}</tbody></table></div>` : '<p class="small muted">한 반 과목끼리 겹치는 블록이 없습니다.</p>'}`;
     const selInfo = sel ? (() => { const x = ev.blocks.flatMap(b => b.secs.map(s => ({ ...s, b: b.b }))).find(s => s.key === sel); return x ? `<div class="sel-bar mb12"><b>${esc(x.subj.name)}${x.subj.sec > 1 ? ` ${x.n}반` : ''}</b> 선택됨 (${BL[x.b]} 블록) — 옮길 블록을 누르거나 끌어다 놓으세요. <button class="btn sm" data-act="blk-lock">${x.locked ? '고정 해제' : '이 반 고정'}</button><button class="btn sm ghost" data-act="blk-desel">선택 취소</button></div>` : ''; })() : '';
     const issues = [];
+    if (ev.seatShort.length) issues.push(badge(`좌석 부족 블록 ${ev.seatShort.map(x => BL[x.b]).join('·')}`, 'bad'));
+    const asg = ros ? assignStudents(S, cur.g, cur.s, cur.G) : null;
+    const overSec = asg ? asg.sections.filter(x => x.over) : [];
+    if (overSec.length) issues.push(badge(`정원(${ctx.cap}명) 초과 분반 ${overSec.length}개: ${overSec.slice(0, 3).map(x => `${x.name}${x.total > 1 ? x.n : ''} ${x.size}명`).join(', ')}`, 'bad') + ` <button class="btn sm" data-act="blk-capfix" title="고정하지 않은 분반을 다른 블록으로 옮기거나 맞바꿔 학생 분반 배정의 정원 초과를 줄입니다">정원 맞추기</button>`);
+    const rec0 = S.blocks[cur.G.id] || {};
+    const rosChanged = ros && rec0.rsig && rec0.rsig !== groupRosterSig(S, cur.g, cur.G);
     if (ev.teacherOver) issues.push(badge('교사 동시 수요 초과 블록 있음', 'bad'));
     if (ev.specialOver) issues.push(badge('특별실 초과', 'bad'));
     if (ev.maxN > ctx.genCap) issues.push(badge(`일반교실 부족(최대 ${ev.maxN}반 / ${ctx.genCap}실)`, 'warn'));
@@ -6905,7 +7365,9 @@ PANELS.blocks = {
     return `<div class="panel-head"><div><h2>${navTitle('blocks')}</h2><p>선택군 택${N} → <b>${N}개 블록</b>(${range(N).map(b => BL[b]).join('·')})을 각 ${gc.cr}시간씩, 주당 ${N * gc.cr}시간 운영합니다. 블록마다 ${cur.g}학년 대상 학생 ${ctx.Sg}명이 동시에 이동 수업을 하므로, 블록 안의 반 수만큼 교실과 교사가 동시에 필요합니다.</p></div>
       <div class="row"><button class="btn primary" data-act="blk-auto">자동 편성</button><button class="btn" data-act="blk-shuffle">다른 편성 시도</button><button class="btn" data-act="blk-unlock">고정 모두 해제</button></div></div>
       ${tabs}
-      <div class="row mt12 mb12">${issues.join(' ')} ${ros ? badge(`학생 명단 반영(${ros.total}명)`, 'acc') : ''} <span class="small muted">개설 반 ${gc.K}개 · 블록당 평균 ${fmt(gc.K / N, 1)}반 · 학급 교실 ${gr.classes}실 + 여유 ${S.rooms.extra}실</span></div>
+      <div class="row mt12 mb12">${issues.join(' ')} ${ros ? badge(`학생 명단 반영(${ros.total}명)`, 'acc') : ''} <span class="small muted">개설 반 ${gc.K}개 · 블록당 평균 ${fmt(gc.K / N, 1)}반 · 정원 ${ctx.cap}명(기준 ${ctx.capStd} + 허용 ${ctx.cap - ctx.capStd}) · 학급 교실 ${gr.classes}실 + 여유 ${S.rooms.extra}실</span></div>
+      ${rosChanged ? `<div class="note warn mb12 small">이 편성을 만든 뒤 <b>학생 수강신청 명단이 바뀌었습니다</b>. [자동 편성]을 다시 누르면 바뀐 신청으로 블록을 맞춥니다(고정한 반은 그대로).</div>` : ''}
+      ${gc.seat.short > 0 ? `<div class="note bad mb12 small">개설 반 ${gc.K}개로는 블록마다 학생 ${gc.students}명이 앉을 수 없습니다(블록마다 ${gc.seat.q}반 × ${gc.pick}블록 = ${gc.seat.need}반 필요). [${esc(navTitle('sections'))}]에서 분반 ${gc.seat.short}개를 더 여세요.</div>` : ''}
       ${selInfo}
       <div class="row mb8"><b class="small">${termLabel(cur.key)} · ${esc(cur.G.name)} 블록 편성판</b><span class="grow"></span><span class="tbl-tools no-print"><button class="btn sm" data-act="copy-block" title="블록별 과목 반을 표로 복사해 한글·엑셀에 붙여넣습니다">표 복사</button><button class="btn sm xl" data-act="xl-block" title="블록 편성판과 과목별 분산을 엑셀 파일로 저장합니다">엑셀 추출</button></span></div>
       <div class="board">${cols}</div>
@@ -6955,10 +7417,19 @@ ACTIONS['blk-unlock'] = () => { const cur = currentBlockGroup(App.S); if (!cur) 
 function runBlockDesign(seed) {
   const cur = currentBlockGroup(App.S); if (!cur) return;
   const res = designBlocks(App.S, cur.g, cur.s, cur.G, { mode: 'auto', seed });
-  commit(S => { S.blocks[cur.G.id] = { assign: res.assign, locks: res.locks || {} }; });
+  let rep = null;
+  commit(S => { S.blocks[cur.G.id] = { assign: res.assign, locks: res.locks || {}, rsig: groupRosterSig(S, cur.g, cur.G) }; rep = repairBlockCapacity(S, cur.g, cur.s, cur.G); });
   App.ui.sel = null;
-  toast('블록을 편성했습니다.');
+  toast(rep && rep.moves ? `블록을 편성하고, 학생 분반 배정에 맞춰 분반 ${rep.moves}개 자리를 바꿨습니다(정원 초과 ${rep.before.over}→${rep.after.over}명).` : '블록을 편성했습니다.');
 }
+/* 정원 맞추기: 지금 편성에서 출발해 고정하지 않은 분반만 옮겨 정원 초과·배정 실패를 줄임 */
+ACTIONS['blk-capfix'] = () => {
+  const cur = currentBlockGroup(App.S); if (!cur) return;
+  let rep = null;
+  commit(S => { rep = repairBlockCapacity(S, cur.g, cur.s, cur.G, { maxEval: 800 }); if (S.blocks[cur.G.id]) S.blocks[cur.G.id].rsig = groupRosterSig(S, cur.g, cur.G); });
+  if (!rep) { toast('학생 명단이 있어야 정원을 맞출 수 있습니다.', 'bad'); return; }
+  toast(rep.moves ? `분반 ${rep.moves}개를 옮겨 정원 초과 ${rep.before.over}→${rep.after.over}명, 배정 실패 ${rep.before.failed}→${rep.after.failed}명으로 줄였습니다.${rep.after.over || rep.after.failed ? ' 남은 초과는 분반을 늘리거나 허용 초과 인원을 조정하세요.' : ''}` : `옮겨서 줄일 수 있는 정원 초과가 없습니다(정원 초과 ${rep.after.over}명). 분반을 늘리거나 허용 초과 인원을 조정하세요.`, rep.after.over || rep.after.failed ? 'bad' : '');
+};
 ACTIONS['blk-auto'] = () => runBlockDesign(undefined);
 ACTIONS['blk-shuffle'] = () => runBlockDesign(1 + Math.floor(Math.random() * 1e6));
 
@@ -7278,6 +7749,16 @@ function verdictCard(v) {
     ${v.reasons.length ? `<ul>${v.reasons.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
     ${v.fixes.length ? `<p class="mt8"><b>조정 제안</b></p><ul>${v.fixes.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}</div></div>`;
 }
+/* 확정 전 점검: 운영 판정과 별도로, 학생에게 배포할 시간표를 확정하기 전에 확인할 항목 */
+function confirmReady(v) { return v.level === 'good' && (v.checks || []).every(c => c.level === 'good' || c.level === 'info'); }
+function confirmCard(v) {
+  const cs = v.checks || []; if (!cs.length) return '';
+  const mark = { good: ['✓', 'good'], warn: ['!', 'warn'], bad: ['✕', 'bad'], info: ['i', 'info'] };
+  const graded = cs.filter(c => c.level !== 'info'), pass = graded.filter(c => c.level === 'good').length;
+  const ready = confirmReady(v);
+  return `<div class="card mt12 confirm-card"><h3>확정 전 점검 ${ready ? badge('확정 가능', 'good') : badge(`${pass}/${graded.length} 통과 · 확정 전 확인 필요`, v.level === 'bad' ? 'bad' : 'warn')}<span class="grow"></span><span class="small muted">초록 '운영 가능'은 교실·교사 조건의 판정입니다. 학생에게 배포할 시간표는 아래가 모두 ✓일 때 확정하세요.</span></h3>
+    <table class="tbl compact confirm-tbl"><tbody>${cs.map(c => { const [ic, k] = mark[c.level] || ['?', '']; return `<tr class="ck-${k}"><td class="c ck-ic"><span class="badge ${k}">${ic}</span></td><td class="nowrap"><b>${esc(c.label)}</b></td><td class="small">${esc(c.text)}</td></tr>`; }).join('')}</tbody></table></div>`;
+}
 
 PANELS.tt = {
   render() {
@@ -7329,7 +7810,7 @@ PANELS.tt = {
       ${tile('학년별 주당 시간', G2.map(G => `${G.blockHours + G.Hmax + G.ca}`).join(' · '), G2.map(G => `${G.g}학년 가용 ${G.availCount}`).join(' · '), '시간')}</div>`;
     const hasAuto = (() => { const A = asgRead(S, sem); return Object.values(A.sec).some(e => e && e.a) || Object.values(A.des).some(per => Object.values(per).some(ps => ps.some(p => p.a))); })();
     const reBtn = ev.tconf.length && hasAuto ? '<button class="btn primary" data-act="tt-reassign" title="자동 배정(추천) 칸의 교사를 바꿔 가며 다시 배치해 교사 겹침을 풉니다(직접 정한 칸은 그대로)">교사 배정 조정까지 다시 배치</button>' : '';
-    return head + `${verdictCard(v)}${reevalNote}
+    return head + `${verdictCard(v)}${confirmCard(v)}${reevalNote}
       <div class="row mt12">${reBtn}<button class="btn ${reBtn ? '' : 'primary'}" data-act="tt-run">자동 배치 다시 실행</button><button class="btn" data-act="tt-shuffle">다른 배치 시도</button><button class="btn" data-act="tt-unlock">고정 모두 해제</button><span class="grow"></span>${views}<button class="btn sm xl no-print" data-act="xl-tt" data-view="all" title="시간표 틀·학년별 블록 배치·학급별 기초 시간표·교사·교실 동시 수요${ev.teacherMode ? '·교사별 시간표' : ''}를 한 엑셀 파일(시트 ${ev.teacherMode ? 5 : 4}개)로 저장합니다">${ev.teacherMode ? 5 : 4}가지 보기 엑셀</button></div>
       ${facts}
       <div class="mt12">${selBar}${body}</div>
@@ -7434,7 +7915,8 @@ PANELS.roster = {
       if (assign) {
         const secRows = assign.sections.slice().sort((a, b) => a.block - b.block || a.name.localeCompare(b.name) || a.n - b.n)
           .map(s => `<tr><td class="c">${BL[s.block] || '-'}</td><td>${esc(s.name)}${s.total > 1 ? ` ${s.n}반` : ''}</td><td class="c num ${s.over ? 'cell-warn' : ''}">${s.size}</td><td class="small">${s.students.slice(0, 40).map(st => esc(st.id)).join(', ')}${s.students.length > 40 ? ' …' : ''}</td></tr>`).join('');
-        assignHtml = `<h4>분반 배정 결과 ${assign.failed.length ? badge(`배정 불가 ${assign.failed.length}명`, 'bad') : badge('전원 배정', 'good')} ${assign.sections.some(s => s.over) ? badge(`정원(${assign.cap}명) 초과 반 있음`, 'warn') : ''}</h4>
+        const nStd = assign.sections.filter(s => s.std).length, zeroN = (assign.wrongCount || []).filter(w => w.n === 0).length;
+        assignHtml = `<h4>분반 배정 결과 ${assign.failed.length ? badge(`배정 불가 ${assign.failed.length}명`, 'bad') : badge('전원 배정', 'good')} ${assign.sections.some(s => s.over) ? badge(`정원(${assign.cap}명) 초과 반 ${assign.sections.filter(s => s.over).length}개`, 'bad') : ''} ${nStd ? badge(`기준(${assign.capStd}명) 초과·허용 범위 ${nStd}개`, 'info') : ''} ${(assign.unopened || []).length ? badge(`미개설 과목 신청 ${assign.unopened.length}명`, 'warn') : ''} ${zeroN ? badge(`미신청(0과목) ${zeroN}명`, 'warn') : ''}</h4>
           <div class="row mb8"><button class="btn sm" data-act="assign-export" data-g="${x.G.id}">배정 명단 엑셀</button>${copyBtn('asg' + x.G.id, '표 복사', `${g}학년 ${x.s}학기 ${x.G.name} 분반 배정`)}</div>
           <div class="tbl-wrap"><table class="tbl compact" id="asg${x.G.id}"><thead><tr><th>블록</th><th>과목 반</th><th>인원</th><th>학번</th></tr></thead><tbody>${secRows}</tbody></table></div>
           ${assign.failed.length ? `<p class="small mt8"><b>배정하지 못한 학생</b>(고른 과목이 같은 블록에만 있음): ${assign.failed.slice(0, 20).map(f => `${esc(f.id)}(${f.subjects.map(esc).join('·')})`).join(', ')}${assign.failed.length > 20 ? ' …' : ''}</p>` : ''}`;
@@ -7442,7 +7924,7 @@ PANELS.roster = {
       return `<div class="card mt12"><h3>${x.s}학기 · ${esc(x.G.name)} (택${x.G.pick}) <span class="badge">명단 ${x.inGroup}명</span> ${diffs ? badge(`입력 인원과 다른 과목 ${diffs}개`, 'warn') : badge('입력 인원과 일치', 'good')}<span class="grow"></span>
         ${diffs ? `<button class="btn sm" data-act="roster-apply" data-g="${x.G.id}">명단 인원으로 신청 인원 바꾸기</button>` : ''}<button class="btn sm primary" data-act="assign-run" data-g="${x.G.id}" data-s="${x.s}">분반 배정 실행</button></h3>
         <div class="grid2"><div><div class="row mb8"><span class="small muted">과목별 신청 인원 대조</span><span class="grow"></span>${copyBtn('rsum' + x.G.id, '표 복사', `${g}학년 ${x.s}학기 ${x.G.name} 명단 대조`)}</div><div class="tbl-wrap"><table class="tbl compact" id="rsum${x.G.id}"><thead><tr><th>과목</th><th>입력 신청</th><th>명단 인원</th><th>차이</th></tr></thead><tbody>${x.rows.map(r => `<tr><td>${esc(r.x.name)}</td><td class="c num">${r.entered}</td><td class="c num">${r.roster}</td><td class="c num ${r.roster !== r.entered ? 'cell-warn' : ''}">${fmtSigned(r.roster - r.entered)}</td></tr>`).join('')}</tbody></table></div></div>
-        <div><p class="small"><b>고른 과목 수</b>: ${x.dist.map(([n, c]) => `${n}과목 ${c}명${n !== x.G.pick ? ' ' + badge('택 수와 다름', 'warn') : ''}`).join(' · ') || '–'}</p>
+        <div><p class="small"><b>고른 과목 수</b>: ${x.dist.map(([n, c]) => `${n}과목 ${c}명${n !== x.G.pick ? ' ' + badge('택 수와 다름', 'warn') : ''}`).join(' · ') || '–'}${x.zero ? ` · 0과목(미신청) ${x.zero}명 ${badge('확인 필요', 'warn')}` : ''}</p>
           <p class="small"><b>함께 많이 고른 과목</b></p><ul class="small" style="margin:0;padding-left:18px">${pairs.map(p => `<li>${p}</li>`).join('') || '<li class="muted">–</li>'}</ul></div></div>
         ${assignHtml}</div>`;
     }).join('');
@@ -7979,6 +8461,8 @@ ACTIONS['export-xlsx'] = async () => {
       XL.row(sm, r++, 0, [`${sem}학기`, res.v.title], res.v.level === 'good' ? 'good' : res.v.level === 'bad' ? 'bad' : 'warn');
       res.v.reasons.forEach(x => XL.row(sm, r++, 0, ['', x], 'txtW'));
       res.v.fixes.forEach(x => XL.row(sm, r++, 0, ['조정 제안', x], 'txtW'));
+      const mk = { good: '✓', warn: '!', bad: '✕', info: 'i' };
+      (res.v.checks || []).forEach(c => XL.row(sm, r++, 0, [`확정 전 점검 ${mk[c.level] || ''} ${c.label}`, c.text], c.level === 'good' ? 'good' : c.level === 'bad' ? 'bad' : c.level === 'warn' ? 'warn' : 'txtW'));
     }
   }
   download(XL.toBlob(wb), `개설시간표_${(S.school.name || '학교').replace(/[\\/:*?"<>|\s]/g, '')}_${S.school.year}_${fileStamp()}.xlsx`);
@@ -8008,7 +8492,7 @@ ACTIONS['print-report'] = async () => {
   for (const sem of [1, 2]) {
     const { M, st } = ttCurrent(S, sem); if (!st) continue;
     const ev = ttEvaluate(M, st); const v = ttVerdict(M, st, ev);
-    parts.push(`<div class="pr-h">${sem}학기 운영 판정</div>${verdictCard(v)}`);
+    parts.push(`<div class="pr-h">${sem}학기 운영 판정</div>${verdictCard(v)}${confirmCard(v)}`);
   }
   parts.push(`<div class="pr-h">개설 학급·확대학급 요약</div>`);
   App._printing = true;
@@ -8560,7 +9044,7 @@ function sttCellHTML(S, c) {
 }
 const STT_FLAG = f => f.k === 'failed' ? `배정 불가(${esc(f.gname)}): ${f.subjects.map(esc).join('·')} — 같은 블록에만 열림`
   : f.k === 'unopened' ? `미개설 과목 신청(${esc(f.gname)}): ${f.subjects.map(esc).join('·')}`
-  : f.k === 'wrong' ? `${esc(f.gname)} 신청 ${f.n}과목(택${f.pick})`
+  : f.k === 'wrong' ? (f.n === 0 ? `${esc(f.gname)} 선택 과목 미신청(택${f.pick}) — 블록 시간이 공강` : `${esc(f.gname)} 신청 ${f.n}과목(택${f.pick})`)
   : f.k === 'extra' ? '수강신청 기록이 없는 학생 — 선택 칸에 듣는 과목·분반을 적으세요'
   : `${esc(f.gname)} 신청 과목이 블록 수보다 많음`;
 /* 학생 1명 카드(화면·인쇄 공용) */
